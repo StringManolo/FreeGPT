@@ -2,7 +2,7 @@
 
 const { registerTool } = require('./registry');
 const { assertSafeUrl } = require('./ssrf');
-const { htmlToText } = require('./web-fetch');
+const { htmlToText, combineSignals } = require('./web-fetch');
 
 const TIMEOUT_MS = 15000;
 const MAX_RESULTS = 8;
@@ -34,17 +34,18 @@ function parseDuckDuckGo(html) {
   return results;
 }
 
-async function search(query) {
+async function search(query, externalSignal) {
   const target = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   await assertSafeUrl(target);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const signal = combineSignals(controller.signal, externalSignal);
 
   let res;
   try {
     res = await fetch(target, {
-      signal: controller.signal,
+      signal,
       headers: {
         'User-Agent': 'FreeGPT/0.1',
         Accept: 'text/html',
@@ -81,8 +82,8 @@ registerTool({
     }
     return { ok: true };
   },
-  async execute(args) {
-    const pages = await search(args.query.trim());
+  async execute(args, ctx) {
+    const pages = await search(args.query.trim(), ctx && ctx.signal);
     return { query: args.query, pages };
   },
 });

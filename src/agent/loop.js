@@ -52,7 +52,22 @@ function resolveLimits(agentConfig) {
   return limits;
 }
 
-async function executeOne(call, { enabledTools, agentConfig, events, limits }) {
+async function executeOne(call, { enabledTools, agentConfig, events, limits, signal }) {
+  // Cancelación previa: si el cliente ya abortó, no ejecutamos la tool.
+  if (signal && signal.aborted) {
+    const error = { code: 'CANCELLED', message: 'Tool call cancelled by client.' };
+    events.toolFailed(call.id, call.tool, error);
+    return {
+      call,
+      text: formatToolResult({
+        id: call.id,
+        tool: call.tool,
+        status: FGTP_STATUS.ERROR,
+        error,
+      }),
+    };
+  }
+
   if (!enabledTools[call.tool]) {
     const error = { code: 'TOOL_DISABLED', message: `Tool not enabled for this conversation: ${call.tool}` };
     events.toolDenied(call.id, call.tool, error);
@@ -98,7 +113,7 @@ async function executeOne(call, { enabledTools, agentConfig, events, limits }) {
   events.toolStarted(call.id, call.tool);
 
   try {
-    const result = await executeTool(call.tool, call.arguments, { agentConfig });
+    const result = await executeTool(call.tool, call.arguments, { agentConfig, signal });
     const json = JSON.stringify(result === undefined ? null : result);
 
     if (json.length > limits.maxResultBytes) {
@@ -191,24 +206,25 @@ async function runAgent({
     events.thinking();
 
     let raw;
-try {
-  raw = await router.chatCompletion({
-    model,
-    messages: workingMessages,
-    options: {},
-  });
-} catch (err) {
-  const error = {
-    code: 'EXECUTION_FAILED',
-    message: err && err.message ? err.message : 'Model call failed.',
-  };
-  events.error(error);
-  return { status: 'error', error, iterations, callsUsed };
-}
+    try {
+      raw = await router.chatCompletion({
+        model,
+        messages: workingMessages,
+        options: {},
+        signal,
+      });
+    } catch (err) {
+      const error = {
+        code: err && err.code ? err.code : 'EXECUTION_FAILED',
+        message: err && err.message ? err.message : 'Model call failed.',
+      };
+      events.error(error);
+      return { status: 'error', error, iterations, callsUsed };
+    }
 
-// Router real → { completion, meta }. Router de tests → completion directa.
-const response = raw && raw.completion ? raw.completion : raw;
-const text = extractText(response);
+    // Router real → { completion, meta }. Router de tests → completion directa.
+    const response = raw && raw.completion ? raw.completion : raw;
+    const text = extractText(response);
 
     const parser = new FgtpParser({
       knownTools,
@@ -273,9 +289,16 @@ const text = extractText(response);
     for (let i = 0; i < calls.length; i += limits.maxParallel) {
       const batch = calls.slice(i, i + limits.maxParallel);
       const batchResults = await Promise.all(
-        batch.map((call) => executeOne(call, { enabledTools, agentConfig, events, limits }))
+        batch.map((call) =>
+          executeOne(call, { enabledTools, agentConfig, events, limits, signal })
+        )
       );
       results.push(...batchResults);
+
+      if (signal && signal.aborted) {
+        events.cancelled();
+        return { status: 'cancelled', iterations, callsUsed };
+      }
     }
 
     const denialResults = denials.map((d) => {

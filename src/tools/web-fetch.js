@@ -8,6 +8,27 @@ const MAX_REDIRECTS = 3;
 const TIMEOUT_MS = 15000;
 const MAX_TEXT = 32 * 1024;
 
+/**
+ * Combina varios AbortSignal en uno. Prefiere AbortSignal.any (Node 20.3+),
+ * con fallback manual para versiones anteriores.
+ */
+function combineSignals(...signals) {
+  const valid = signals.filter(Boolean);
+  if (valid.length === 0) return undefined;
+  if (valid.length === 1) return valid[0];
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any(valid);
+
+  const controller = new AbortController();
+  for (const s of valid) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      return controller.signal;
+    }
+    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}
+
 function htmlToText(html) {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -28,19 +49,20 @@ function htmlToText(html) {
     .trim();
 }
 
-async function fetchWithRedirects(startUrl) {
+async function fetchWithRedirects(startUrl, externalSignal) {
   let current = startUrl;
   for (let i = 0; i <= MAX_REDIRECTS; i++) {
     const { parsed } = await assertSafeUrl(current);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const signal = combineSignals(controller.signal, externalSignal);
 
     let res;
     try {
       res = await fetch(parsed.toString(), {
         redirect: 'manual',
-        signal: controller.signal,
+        signal,
         headers: {
           'User-Agent': 'FreeGPT/0.1 (+https://github.com/)',
           Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5',
@@ -72,6 +94,10 @@ async function fetchWithRedirects(startUrl) {
     const chunks = [];
     let received = 0;
     while (true) {
+      if (externalSignal && externalSignal.aborted) {
+        try { await reader.cancel(); } catch {}
+        throw Object.assign(new Error('Fetch cancelled by client.'), { code: 'CANCELLED' });
+      }
       const { value, done } = await reader.read();
       if (done) break;
       received += value.length;
@@ -117,9 +143,9 @@ registerTool({
     }
     return { ok: true };
   },
-  async execute(args) {
-    return await fetchWithRedirects(args.url.trim());
+  async execute(args, ctx) {
+    return await fetchWithRedirects(args.url.trim(), ctx && ctx.signal);
   },
 });
 
-module.exports = { htmlToText };
+module.exports = { htmlToText, combineSignals };
