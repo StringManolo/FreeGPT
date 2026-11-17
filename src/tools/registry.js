@@ -1,5 +1,7 @@
 'use strict';
 
+const tracker = require('../agent/tracker');
+
 const registry = new Map();
 
 function registerTool(def) {
@@ -85,7 +87,16 @@ async function executeTool(toolName, args, ctx) {
     err.code = 'UNKNOWN_TOOL';
     throw err;
   }
-  return await tool.execute(args, ctx || {});
+  tracker.logStart(toolName, args);
+  const startedAt = Date.now();
+  try {
+    const result = await tool.execute(args, ctx || {});
+    tracker.logOk(toolName, Date.now() - startedAt, result);
+    return result;
+  } catch (err) {
+    tracker.logFail(toolName, Date.now() - startedAt, err.message);
+    throw err;
+  }
 }
 
 module.exports = {

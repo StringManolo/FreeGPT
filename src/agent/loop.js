@@ -10,6 +10,7 @@ const {
 const { checkPermission } = require('./permissions');
 const { buildSystemPrompt } = require('./prompt');
 const { createEventEmitter } = require('./events');
+const tracker = require('./tracker');
 
 const DEFAULTS = {
   maxIterations: 15,
@@ -55,6 +56,7 @@ function resolveLimits(agentConfig) {
 async function executeOne(call, { enabledTools, agentConfig, events, limits, signal }) {
   // Cancelación previa: si el cliente ya abortó, no ejecutamos la tool.
   if (signal && signal.aborted) {
+    tracker.logDeny(call.tool, 'cancelled by client');
     const error = { code: 'CANCELLED', message: 'Tool call cancelled by client.' };
     events.toolFailed(call.id, call.tool, error);
     return {
@@ -69,6 +71,7 @@ async function executeOne(call, { enabledTools, agentConfig, events, limits, sig
   }
 
   if (!enabledTools[call.tool]) {
+    tracker.logDeny(call.tool, 'tool not enabled for this conversation');
     const error = { code: 'TOOL_DISABLED', message: `Tool not enabled for this conversation: ${call.tool}` };
     events.toolDenied(call.id, call.tool, error);
     return {
@@ -84,6 +87,7 @@ async function executeOne(call, { enabledTools, agentConfig, events, limits, sig
 
   const argCheck = validateArguments(call.tool, call.arguments);
   if (!argCheck.ok) {
+    tracker.logDeny(call.tool, `invalid arguments: ${argCheck.message}`);
     events.toolFailed(call.id, call.tool, argCheck);
     return {
       call,
@@ -98,6 +102,7 @@ async function executeOne(call, { enabledTools, agentConfig, events, limits, sig
 
   const perm = checkPermission(call.tool, call.arguments, {}, agentConfig);
   if (!perm.ok) {
+    tracker.logDeny(call.tool, (perm.error && perm.error.message) || 'permission denied');
     events.toolDenied(call.id, call.tool, perm.error);
     return {
       call,

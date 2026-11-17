@@ -11,7 +11,23 @@ const { runSetup } = require("./cli/commands/setup");
 const { runUi } = require("./cli/commands/ui");
 
 (async () => {
+  // Detectar --track-agent ANTES de parseCLI (que puede consumir argv).
+  if (process.argv.includes("--track-agent")) {
+    process.env.FREEGPT_TRACK_AGENT = "1";
+  }
+
   const cli = await parseCLI();
+
+  // Fallback: por si parseCLI lo expone en el resultado parseado.
+  const parsedTrack = Boolean(
+    (cli.c && (cli.c["track-agent"] || cli.c.trackAgent)) ||
+    (cli.s && (cli.s["track-agent"] || cli.s.trackAgent))
+  );
+  if (parsedTrack) process.env.FREEGPT_TRACK_AGENT = "1";
+
+  if (process.env.FREEGPT_TRACK_AGENT === "1") {
+    console.log(cli.color.bold.cyan("track-agent:") + " logging agent tool calls to this console");
+  }
 
   if (cli.s.h || cli.c.help) {
     printHelp(cli);
@@ -87,6 +103,7 @@ function printHelp(cli) {
   console.log("  -h, --help           Show this help");
   console.log("  -v, --version        Show version");
   console.log("  -u, --ui             Serve the web UI (with serve)");
+  console.log("  --track-agent        Log every agent tool call to this console");
   console.log("  --config <path>      Use a custom config file");
   console.log("  --port <number>      Override the listening port");
 }
