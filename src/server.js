@@ -110,7 +110,7 @@ async function handleChat(req, res, router) {
 
   const { model, messages, stream, ...options } = body;
 
-    try {
+  try {
     const { completion, meta } = await router.chatCompletion({
       model,
       messages,
@@ -133,10 +133,31 @@ async function handleChat(req, res, router) {
         freegpt: { attempts: err.attempts }
       });
     }
+    if (err.code === "NO_PROVIDERS" || err.code === "NO_CHAIN") {
+      return sendJson(res, 503, {
+        error: {
+          message: err.message,
+          type: "no_providers",
+          code: err.code.toLowerCase(),
+          param: null
+        },
+        freegpt: { skipped: err.skipped || [] }
+      });
+    }
     console.error("[freegpt] Router error:", err.message);
-    return sendError(res, 502, err.message, "provider_error");
+    return sendJson(res, 502, {
+      error: {
+        message: err.message,
+        type: "provider_error",
+        code: (err.code || "all_failed").toLowerCase(),
+        param: null
+      },
+      freegpt: {
+        attempts: err.attempts || [],
+        summary: err.summary || ""
+      }
+    });
   }
-
 }
 
 function handleModels(res, config) {

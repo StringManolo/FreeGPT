@@ -14,3 +14,4 @@
 - Add pasted files and files from system in a new block like claude.ai does
 - Allow multiple API keys per model/API (if one fails, it has backup). 
 - Add option to smart select model by tast (for example if you select Code, uses the best model available for that task)
+- Add support to multiple files
