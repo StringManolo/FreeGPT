@@ -2,13 +2,16 @@
 
 const STORAGE_KEY = "freegpt.conversations.v2";
 const SETTINGS_KEY = "freegpt.settings.v2";
+const PASTE_ATTACH_THRESHOLD = 1500;
+const PASTE_ATTACH_LINES = 15;
 
 const state = {
   conversations: [],
   activeId: null,
   streaming: false,
   abort: null,
-  editingMsg: null
+  editingMsg: null,
+  previewAttachment: null
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -20,7 +23,10 @@ const ICONS = {
   resend: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`,
   regenerate: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`,
   rename: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`,
-  trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`
+  trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`,
+  file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`,
+  x: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
+  pencilSmall: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`
 };
 
 /* ---------- Settings ---------- */
@@ -59,8 +65,10 @@ function loadConversations() {
     state.conversations = [];
   }
   for (const conv of state.conversations) {
+    if (!Array.isArray(conv.pendingAttachments)) conv.pendingAttachments = [];
     for (const msg of conv.messages) {
       if (!msg.id) msg.id = uid();
+      if (msg.role === "user" && !Array.isArray(msg.attachments)) msg.attachments = [];
     }
   }
 }
@@ -132,7 +140,8 @@ function createConversation() {
     id: uid(),
     title: "New chat",
     model: currentModelDefault(),
-    messages: []
+    messages: [],
+    pendingAttachments: []
   };
   state.conversations.unshift(conv);
   state.activeId = conv.id;
@@ -177,6 +186,104 @@ function renameConversation(id) {
 function currentModelDefault() {
   const sel = document.getElementById("model-select");
   return sel?.value || "fast-chat";
+}
+
+/* ---------- Pending attachments (composer) ---------- */
+
+function addPendingAttachment({ name, content }) {
+  const conv = getActive();
+  if (!conv) return;
+  if (!Array.isArray(conv.pendingAttachments)) conv.pendingAttachments = [];
+  conv.pendingAttachments.push({ id: uid(), name, content });
+  saveConversations();
+  renderAttachmentsBar();
+}
+function removePendingAttachment(id) {
+  const conv = getActive();
+  if (!conv) return;
+  conv.pendingAttachments = conv.pendingAttachments.filter((a) => a.id !== id);
+  saveConversations();
+  renderAttachmentsBar();
+}
+function renderAttachmentsBar() {
+  const bar = $("#attachments-bar");
+  if (!bar) return;
+  const conv = getActive();
+  const attachments = conv?.pendingAttachments || [];
+  if (attachments.length === 0) {
+    bar.innerHTML = "";
+    bar.style.display = "none";
+    return;
+  }
+  bar.style.display = "flex";
+  bar.innerHTML = "";
+  for (const att of attachments) {
+    const chip = document.createElement("div");
+    chip.className = "attachment-chip";
+    chip.innerHTML = `
+      <span class="chip-icon">${ICONS.file}</span>
+      <span class="chip-name" title="${escapeHtml(att.name)}">${escapeHtml(att.name)}</span>
+      <button class="chip-action" data-act="edit" title="Edit">${ICONS.pencilSmall}</button>
+      <button class="chip-action" data-act="remove" title="Remove">${ICONS.x}</button>
+    `;
+    chip.querySelector(".chip-name").addEventListener("click", () => openAttachmentPreview(att, "composer"));
+    chip.querySelector("[data-act='edit']").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openAttachmentEdit(att, "composer");
+    });
+    chip.querySelector("[data-act='remove']").addEventListener("click", (e) => {
+      e.stopPropagation();
+      removePendingAttachment(att.id);
+    });
+    bar.appendChild(chip);
+  }
+}
+
+/* ---------- Attachment preview/edit dialog ---------- */
+
+function openAttachmentPreview(att, context) {
+  state.previewAttachment = { ...att, context };
+  $("#attachment-dialog-title").textContent = att.name;
+  $("#attachment-preview").textContent = att.content;
+  $("#attachment-preview").classList.remove("hidden");
+  $("#attachment-edit").classList.add("hidden");
+  $("#attachment-edit").value = att.content;
+  if (context === "composer") {
+    $("#attachment-edit-btn").classList.remove("hidden");
+  } else {
+    $("#attachment-edit-btn").classList.add("hidden");
+  }
+  $("#attachment-save-btn").classList.add("hidden");
+  $("#attachment-dialog").showModal();
+}
+
+function openAttachmentEdit(att, context) {
+  if (context !== "composer") return;
+  openAttachmentPreview(att, context);
+  switchToAttachmentEdit();
+}
+
+function switchToAttachmentEdit() {
+  $("#attachment-preview").classList.add("hidden");
+  $("#attachment-edit").classList.remove("hidden");
+  $("#attachment-edit-btn").classList.add("hidden");
+  $("#attachment-save-btn").classList.remove("hidden");
+  $("#attachment-edit").focus();
+}
+
+function saveAttachmentEdit() {
+  const att = state.previewAttachment;
+  if (!att || att.context !== "composer") return;
+  const conv = getActive();
+  const target = conv?.pendingAttachments?.find((a) => a.id === att.id);
+  if (target) {
+    target.content = $("#attachment-edit").value;
+    saveConversations();
+    renderAttachmentsBar();
+    toast("Attachment updated");
+  }
+  state.previewAttachment = null;
+  $("#attachment-dialog").close();
 }
 
 /* ---------- Rendering ---------- */
@@ -243,6 +350,7 @@ function renderMessages() {
   }
 
   if (wasNearBottom) scrollToBottom();
+  renderAttachmentsBar();
 }
 
 function renderMessage(msg) {
@@ -269,6 +377,10 @@ function renderMessage(msg) {
   }
   wrap.appendChild(bubble);
 
+  if (msg.role === "user" && msg.attachments?.length) {
+    wrap.appendChild(renderMessageAttachments(msg.attachments));
+  }
+
   if (msg.role === "assistant" && msg.freegpt && settings.showModel) {
     const badge = document.createElement("span");
     badge.className = "badge";
@@ -293,6 +405,22 @@ function renderMessage(msg) {
   wrap.appendChild(actions);
 
   return wrap;
+}
+
+function renderMessageAttachments(attachments) {
+  const bar = document.createElement("div");
+  bar.className = "attachments-bar message-attachments";
+  for (const att of attachments) {
+    const chip = document.createElement("div");
+    chip.className = "attachment-chip";
+    chip.innerHTML = `
+      <span class="chip-icon">${ICONS.file}</span>
+      <span class="chip-name" title="${escapeHtml(att.name)}">${escapeHtml(att.name)}</span>
+    `;
+    chip.addEventListener("click", () => openAttachmentPreview(att, "message"));
+    bar.appendChild(chip);
+  }
+  return bar;
 }
 
 function renderProcess(meta, status) {
@@ -353,7 +481,12 @@ async function handleMessageAction(msgId, action) {
   const msg = conv.messages[idx];
 
   if (action === "copy") {
-    await copyText(msg.content, "Copied to clipboard");
+    let text = msg.content;
+    if (msg.attachments?.length) {
+      const prefix = msg.attachments.map((a) => `[${a.name}]\n${a.content}`).join("\n\n");
+      text = prefix + (text ? "\n\n" + text : "");
+    }
+    await copyText(text, "Copied to clipboard");
     return;
   }
 
@@ -392,7 +525,7 @@ async function saveEditedMessage() {
   const editing = state.editingMsg;
   if (!editing) return;
   const newContent = $("#edit-text").value.trim();
-  if (!newContent) return;
+  if (!newContent && !editing.attachments?.length) return;
 
   const conv = getActive();
   if (!conv) return;
@@ -417,19 +550,44 @@ async function sendMessage() {
 
   const input = $("#input");
   const text = input.value.trim();
-  if (!text) return;
+  const attachments = (conv.pendingAttachments || []).slice();
+
+  if (!text && attachments.length === 0) return;
 
   input.value = "";
   input.style.height = "auto";
 
-  conv.messages.push({ id: uid(), role: "user", content: text });
+  conv.messages.push({
+    id: uid(),
+    role: "user",
+    content: text,
+    attachments: attachments.map((a) => ({ id: uid(), name: a.name, content: a.content }))
+  });
+  conv.pendingAttachments = [];
   if (conv.title === "New chat") {
-    conv.title = text.slice(0, 40).trim();
+    const source = text || attachments[0]?.name || "New chat";
+    conv.title = source.slice(0, 40).trim();
   }
   saveConversations();
   renderSidebar();
+  renderAttachmentsBar();
 
   await streamAssistantResponse(conv);
+}
+
+function buildApiMessages(messages) {
+  return messages
+    .filter((m) => m.role === "user" || (m.role === "assistant" && m.content))
+    .map((m) => {
+      if (m.role === "user" && m.attachments?.length) {
+        const prefix = m.attachments
+          .map((a) => `**📎 ${a.name}**\n\`\`\`\n${a.content}\n\`\`\`\n`)
+          .join("\n");
+        const content = m.content ? `${prefix}\n${m.content}` : prefix;
+        return { role: "user", content };
+      }
+      return { role: m.role, content: m.content };
+    });
 }
 
 async function streamAssistantResponse(conv) {
@@ -454,9 +612,7 @@ async function streamAssistantResponse(conv) {
   state.abort = controller;
 
   try {
-    const apiMessages = conv.messages
-      .filter((m) => m.role === "user" || (m.role === "assistant" && m.content))
-      .map((m) => ({ role: m.role, content: m.content }));
+    const apiMessages = buildApiMessages(conv.messages);
 
     const res = await fetch(settings.endpoint, {
       method: "POST",
@@ -555,10 +711,7 @@ async function handleFileSelect(file) {
   }
   try {
     const text = await file.text();
-    const input = $("#input");
-    input.value = `[File: ${file.name}]\n\`\`\`\n${text}\n\`\`\`\n\n${input.value}`;
-    input.dispatchEvent(new Event("input"));
-    input.focus();
+    addPendingAttachment({ name: file.name, content: text });
     toast(`Attached ${file.name}`);
   } catch (err) {
     toast(`Failed to read file: ${err.message}`);
@@ -597,9 +750,15 @@ function doExport() {
 function formatConversationAsMarkdown(conv) {
   const lines = [`# ${conv.title}`, `_Model: ${conv.model}_`, ""];
   for (const msg of conv.messages) {
-    if (!msg.content) continue;
+    if (!msg.content && !msg.attachments?.length) continue;
     const role = msg.role === "user" ? "User" : "Assistant";
-    lines.push(`## ${role}`, "", msg.content, "");
+    lines.push(`## ${role}`, "");
+    if (msg.attachments?.length) {
+      for (const att of msg.attachments) {
+        lines.push(`**Attachment: ${att.name}**`, "```", att.content, "```", "");
+      }
+    }
+    if (msg.content) lines.push(msg.content, "");
   }
   return lines.join("\n");
 }
@@ -643,6 +802,13 @@ $("#save-edit").addEventListener("click", (e) => {
   saveEditedMessage();
 });
 
+$("#attachment-cancel-btn").addEventListener("click", () => {
+  state.previewAttachment = null;
+  $("#attachment-dialog").close();
+});
+$("#attachment-edit-btn").addEventListener("click", switchToAttachmentEdit);
+$("#attachment-save-btn").addEventListener("click", saveAttachmentEdit);
+
 $("#open-settings").addEventListener("click", () => {
   $("#setting-endpoint").value = settings.endpoint;
   $("#setting-show-process").checked = settings.showProcess;
@@ -673,11 +839,22 @@ $("#input").addEventListener("keydown", (e) => {
     sendMessage();
   }
 });
-
 $("#input").addEventListener("input", () => {
   const el = $("#input");
   el.style.height = "auto";
   el.style.height = Math.min(el.scrollHeight, 200) + "px";
+});
+
+$("#input").addEventListener("paste", (e) => {
+  const text = e.clipboardData?.getData("text/plain");
+  if (!text) return;
+  const lines = text.split("\n").length;
+  if (text.length > PASTE_ATTACH_THRESHOLD || lines > PASTE_ATTACH_LINES) {
+    e.preventDefault();
+    const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
+    addPendingAttachment({ name: `pasted-${stamp}.txt`, content: text });
+    toast("Pasted as attachment");
+  }
 });
 
 $("#messages").addEventListener("click", (e) => {
