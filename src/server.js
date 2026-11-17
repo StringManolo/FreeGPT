@@ -7,6 +7,9 @@ const { loadConfig } = require("./config/load");
 const { buildProviders } = require("./providers");
 const { Router } = require("./router/router");
 
+require("./tools");
+const { runAgentRequest, listAvailableTools } = require("./agent/agent");
+
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
@@ -80,8 +83,16 @@ async function handle(req, res, router, config, ui) {
       return handleModels(res, config);
     }
 
+    if (req.method === "GET" && pathname === "/v1/agent/tools") {
+      return handleAgentTools(res, config);
+    }
+
     if (req.method === "POST" && pathname === "/v1/chat/completions") {
       return await handleChat(req, res, router);
+    }
+
+    if (req.method === "POST" && pathname === "/v1/agent/completions") {
+      return await handleAgentChat(req, res, router, config);
     }
 
     if (ui && req.method === "GET") {
@@ -96,6 +107,8 @@ async function handle(req, res, router, config, ui) {
     } else res.end();
   }
 }
+
+/* ─────────────── Chat (sin cambios) ─────────────── */
 
 async function handleChat(req, res, router) {
   let body;
@@ -159,6 +172,175 @@ async function handleChat(req, res, router) {
     });
   }
 }
+
+/* ─────────────── Agent (nuevo) ─────────────── */
+
+function handleAgentTools(res, config) {
+  const agentConfig = config.agent || {};
+  const tools = listAvailableTools(agentConfig);
+  return sendJson(res, 200, { tools });
+}
+
+async function handleAgentChat(req, res, router, config) {
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (err) {
+    return sendError(res, 400, `Invalid JSON body: ${err.message}`, "invalid_request_error");
+  }
+
+  const problem = validateAgentBody(body);
+  if (problem) return sendError(res, 400, problem, "invalid_request_error");
+
+  const { model, messages, tools, stream } = body;
+  const agentConfig = config.agent || {};
+  const requestedTools = tools || {};
+
+  const controller = new AbortController();
+  res.on("close", () => controller.abort());
+
+  /* Non-streaming */
+  if (!stream) {
+    const events = [];
+    try {
+      const result = await runAgentRequest({
+        router,
+        model,
+        messages,
+        requestedTools,
+        agentConfig,
+        emit: (evt) => events.push(evt),
+        signal: controller.signal
+      });
+
+      if (res.writableEnded || res.destroyed) return;
+
+      if (result.status === "completed") {
+        return sendJson(res, 200, {
+          id: `chatcmpl-${Date.now()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model,
+          choices: [{
+            index: 0,
+            message: { role: "assistant", content: result.content },
+            finish_reason: "stop"
+          }],
+          freegpt: { agent: true, events }
+        });
+      }
+
+      if (result.status === "cancelled") {
+        return sendJson(res, 499, {
+          error: { message: "Agent request cancelled.", type: "cancelled", code: "cancelled" }
+        });
+      }
+
+      const err = result.error || { code: "AGENT_FAILED", message: "Agent failed." };
+      return sendJson(res, 502, {
+        error: { message: err.message, type: "agent_error", code: err.code },
+        freegpt: { agent: true, events }
+      });
+    } catch (err) {
+      if (res.writableEnded || res.destroyed) return;
+      console.error("[freegpt] Agent error:", err);
+      return sendJson(res, 500, {
+        error: {
+          message: err.message || "Agent failed.",
+          type: "agent_error",
+          code: "agent_error"
+        }
+      });
+    }
+  }
+
+  /* Streaming SSE */
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive"
+  });
+
+  const sendEvent = (obj) => {
+    try {
+      res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    } catch {
+      /* cliente desconectado */
+    }
+  };
+
+  const emitChunk = (delta, finishReason = null) => {
+    sendEvent({
+      id: `chatcmpl-${Date.now()}`,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [{ index: 0, delta, finish_reason: finishReason }]
+    });
+  };
+
+  try {
+    const result = await runAgentRequest({
+      router,
+      model,
+      messages,
+      requestedTools,
+      agentConfig,
+      emit: sendEvent,
+      signal: controller.signal
+    });
+
+    if (result.status === "completed" && typeof result.content === "string") {
+      // Un solo chunk con el contenido final (streaming real vendrá después).
+      emitChunk({ content: result.content });
+      emitChunk({}, "stop");
+    } else if (result.status !== "cancelled") {
+      const err = result.error || { code: "AGENT_FAILED", message: "Agent failed." };
+      sendEvent({ type: "agent.error", error: err });
+      // Texto visible para el parser actual del cliente.
+      emitChunk({ content: `\n\n⚠️ Agent error (${err.code}): ${err.message}` });
+      emitChunk({}, "stop");
+    }
+    // status === "cancelled": el cliente cerró; no escribimos nada más.
+  } catch (err) {
+    sendEvent({
+      type: "agent.error",
+      error: { code: "AGENT_ERROR", message: err.message || "Agent failed." }
+    });
+    emitChunk({ content: `\n\n⚠️ Agent error: ${err.message || "unknown"}` });
+    emitChunk({}, "stop");
+  }
+
+  res.write("data: [DONE]\n\n");
+  res.end();
+}
+
+function validateAgentBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return "Request body must be a JSON object.";
+  }
+  if (body.mode !== "agent") {
+    return `'mode' must be "agent" for /v1/agent/completions.`;
+  }
+  if (typeof body.model !== "string" || body.model.length === 0) {
+    return "Missing or invalid 'model' (expected a non-empty string).";
+  }
+  if (!Array.isArray(body.messages) || body.messages.length === 0) {
+    return "'messages' must be a non-empty array.";
+  }
+  for (let i = 0; i < body.messages.length; i++) {
+    const m = body.messages[i];
+    if (!m || typeof m !== "object") return `messages[${i}] must be an object.`;
+    if (typeof m.role !== "string") return `messages[${i}].role must be a string.`;
+    if (typeof m.content !== "string") return `messages[${i}].content must be a string.`;
+  }
+  if (body.tools != null && (typeof body.tools !== "object" || Array.isArray(body.tools))) {
+    return "'tools' must be an object mapping tool names to booleans.";
+  }
+  return null;
+}
+
+/* ─────────────── Common (sin cambios) ─────────────── */
 
 function handleModels(res, config) {
   const groups = Object.keys(config.routing?.model_groups || {});

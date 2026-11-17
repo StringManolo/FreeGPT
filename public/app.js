@@ -11,7 +11,8 @@ const state = {
   streaming: false,
   abort: null,
   editingMsg: null,
-  previewAttachment: null
+  previewAttachment: null,
+  availableTools: []
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -70,12 +71,15 @@ function loadConversations() {
   }
   for (const conv of state.conversations) {
     if (!Array.isArray(conv.pendingAttachments)) conv.pendingAttachments = [];
+    if (conv.mode !== "agent") conv.mode = "chat";                       // nuevo
+    if (!conv.tools || typeof conv.tools !== "object") conv.tools = {};  // nuevo
     for (const msg of conv.messages) {
       if (!msg.id) msg.id = uid();
       if (msg.role === "user" && !Array.isArray(msg.attachments)) msg.attachments = [];
     }
   }
 }
+
 function saveConversations() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.conversations));
 }
@@ -136,11 +140,14 @@ function closeSidebar() {
 function getActive() {
   return state.conversations.find((c) => c.id === state.activeId);
 }
+
 function createConversation() {
   const conv = {
     id: uid(),
     title: "New chat",
     model: currentModelDefault(),
+    mode: "chat",           // nuevo
+    tools: {},              // nuevo
     messages: [],
     pendingAttachments: []
   };
@@ -341,6 +348,7 @@ function renderMessages() {
 
   if (wasNearBottom) scrollToBottom();
   renderAttachmentsBar();
+  renderModeBar();
 }
 
 function renderMessage(msg) {
@@ -354,8 +362,13 @@ function renderMessage(msg) {
     return wrap;
   }
 
-  if (msg.role === "assistant" && msg.freegpt && settings.showProcess) {
-    wrap.appendChild(renderProcess(msg.freegpt, msg.status));
+  if (msg.role === "assistant") {
+    if (msg.agentEvents?.length > 0 && settings.showProcess) {
+      wrap.appendChild(renderAgentActivity(msg));
+    }
+    if (msg.freegpt && settings.showProcess) {
+      wrap.appendChild(renderProcess(msg.freegpt, msg.status));
+    }
   }
 
   const bubble = document.createElement("div");
@@ -541,6 +554,179 @@ function renderProcess(meta, status) {
   return details;
 }
 
+/* Agent mode */
+function agentEndpoint() {
+  try {
+    const base = new URL(settings.endpoint, window.location.origin);
+    base.pathname = "/v1/agent/completions";
+    base.search = "";
+    base.hash = "";
+    return base.toString();
+  } catch {
+    return window.location.origin + "/v1/agent/completions";
+  }
+}
+
+function humanizeTool(name) {
+  return String(name).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatDuration(ms) {
+  if (ms == null) return "";
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+function setMode(mode) {
+  const conv = getActive();
+  if (!conv) return;
+  conv.mode = mode === "agent" ? "agent" : "chat";
+  saveConversations();
+  renderModeBar();
+}
+
+function setToolEnabled(name, enabled) {
+  const conv = getActive();
+  if (!conv) return;
+  if (!conv.tools || typeof conv.tools !== "object") conv.tools = {};
+  conv.tools[name] = !!enabled;
+  saveConversations();
+}
+
+function renderModeBar() {
+  const conv = getActive();
+  const bar = $("#mode-bar");
+  if (!bar) return;
+
+  if (!conv) {
+    bar.classList.add("hidden");
+    return;
+  }
+  bar.classList.remove("hidden");
+  bar.classList.toggle("disabled", state.streaming);
+
+  for (const btn of bar.querySelectorAll(".mode-btn")) {
+    btn.classList.toggle("active", btn.dataset.mode === conv.mode);
+  }
+
+  const panel = $("#tools-panel");
+  if (conv.mode !== "agent") {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+    return;
+  }
+  panel.classList.remove("hidden");
+
+  const tools = state.availableTools || [];
+  if (tools.length === 0) {
+    panel.innerHTML = `<span class="tools-empty">No tools available on this server.</span>`;
+    return;
+  }
+
+  panel.innerHTML = "";
+  for (const tool of tools) {
+    const label = document.createElement("label");
+    label.className = "tool-toggle";
+    label.title = tool.description || "";
+    const checked = !!(conv.tools && conv.tools[tool.name]);
+    label.innerHTML = `
+      <input type="checkbox" data-tool="${escapeHtml(tool.name)}" ${checked ? "checked" : ""}>
+      <span>${escapeHtml(humanizeTool(tool.name))}</span>
+    `;
+    label.querySelector("input").addEventListener("change", (e) => {
+      setToolEnabled(tool.name, e.target.checked);
+    });
+    panel.appendChild(label);
+  }
+}
+
+function pushAgentEvent(assistant, evt) {
+  if (!Array.isArray(assistant.agentEvents)) assistant.agentEvents = [];
+  const last = assistant.agentEvents[assistant.agentEvents.length - 1];
+  // colapsa pensamientos consecutivos
+  if (evt.type === "agent.thinking" && last && last.type === "agent.thinking") return;
+
+  if (evt.type === "agent.started" && !assistant.agentStartedAt) {
+    assistant.agentStartedAt = Date.now();
+  }
+  if (
+    (evt.type === "agent.completed" ||
+      evt.type === "agent.error" ||
+      evt.type === "agent.cancelled") &&
+    assistant.agentStartedAt &&
+    !assistant.agentDurationMs
+  ) {
+    assistant.agentDurationMs = Date.now() - assistant.agentStartedAt;
+  }
+  assistant.agentEvents.push(evt);
+}
+
+function makeAgentStep(kind, text) {
+  const step = document.createElement("div");
+  step.className = "process-step " + kind;
+  const dot = document.createElement("span");
+  dot.className = "dot";
+  const span = document.createElement("span");
+  span.textContent = text;
+  step.appendChild(dot);
+  step.appendChild(span);
+  return step;
+}
+
+function renderAgentActivity(msg) {
+  const events = msg.agentEvents || [];
+  const details = document.createElement("details");
+  details.className = "process agent-process";
+  details.open = msg.status === "streaming";
+
+  const summary = document.createElement("summary");
+  const dur = formatDuration(msg.agentDurationMs);
+  if (msg.status === "streaming") {
+    summary.textContent = "Agent working…";
+  } else {
+    summary.textContent = dur ? `Agent activity · ${dur}` : "Agent activity";
+  }
+  details.appendChild(summary);
+
+  for (const evt of events) {
+    if (evt.type === "agent.completed") continue; // el contenido va en la burbuja
+
+    if (evt.type === "agent.started") {
+      details.appendChild(makeAgentStep("ok", "Agent started"));
+    } else if (evt.type === "agent.thinking") {
+      details.appendChild(makeAgentStep("trying", "Thinking…"));
+    } else if (evt.type === "tool.started") {
+      details.appendChild(makeAgentStep("trying", `Tool · ${evt.tool} · running`));
+    } else if (evt.type === "tool.completed") {
+      details.appendChild(makeAgentStep("ok", `Tool · ${evt.tool} · done`));
+    } else if (evt.type === "tool.failed") {
+      const m = evt.error?.message || "failed";
+      details.appendChild(makeAgentStep("fail", `Tool · ${evt.tool} · ${m}`));
+    } else if (evt.type === "tool.denied") {
+      const m = evt.error?.message || "denied";
+      details.appendChild(makeAgentStep("warn", `Tool · ${evt.tool} · denied`));
+    } else if (evt.type === "agent.error") {
+      const m = evt.error?.message || "unknown";
+      details.appendChild(makeAgentStep("fail", `Error: ${m}`));
+    } else if (evt.type === "agent.cancelled") {
+      details.appendChild(makeAgentStep("warn", "Cancelled"));
+    }
+  }
+  return details;
+}
+
+async function loadAvailableTools() {
+  try {
+    const res = await fetch("/v1/agent/tools");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    state.availableTools = Array.isArray(json.tools) ? json.tools : [];
+  } catch (err) {
+    console.warn("[freegpt] failed to load agent tools:", err);
+    state.availableTools = [];
+  }
+}
+
 function enhanceCodeBlocks(container) {
   container.querySelectorAll("pre").forEach((pre) => {
     if (pre.querySelector(".copy-code")) return;
@@ -677,7 +863,8 @@ async function streamAssistantResponse(conv) {
     role: "assistant",
     content: "",
     status: "streaming",
-    freegpt: null
+    freegpt: null,
+    agentEvents: []
   };
   conv.messages.push(assistant);
   saveConversations();
@@ -694,12 +881,19 @@ async function streamAssistantResponse(conv) {
 
   try {
     const apiMessages = buildApiMessages(conv.messages);
+
+    const isAgent = conv.mode === "agent";
+    const endpoint = isAgent ? agentEndpoint() : settings.endpoint;
+    const requestBody = isAgent
+      ? { model: conv.model, mode: "agent", tools: conv.tools || {}, messages: apiMessages, stream: true }
+      : { model: conv.model, messages: apiMessages, stream: true };
+
     let res;
     try {
-      res = await fetch(settings.endpoint, {
+      res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: conv.model, messages: apiMessages, stream: true }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal
       });
     } catch (netErr) {
@@ -743,6 +937,12 @@ async function streamAssistantResponse(conv) {
           if (data === "[DONE]") continue;
           let evt;
           try { evt = JSON.parse(data); } catch { continue; }
+
+          if (evt.type && (evt.type.startsWith("agent.") || evt.type.startsWith("tool."))) {
+            pushAgentEvent(assistant, evt);
+            needsRender = true;
+            continue;
+          }
 
           if (evt.freegpt) { assistant.freegpt = evt.freegpt; needsRender = true; continue; }
           const delta = evt.choices?.[0]?.delta?.content;
@@ -1006,6 +1206,12 @@ $("#toggle-theme").addEventListener("click", () => { settings.theme = settings.t
 $("#send").addEventListener("click", sendMessage);
 $("#stop").addEventListener("click", () => state.abort?.abort());
 
+$("#mode-bar").addEventListener("click", (e) => {
+  const btn = e.target.closest(".mode-btn");
+  if (!btn) return;
+  setMode(btn.dataset.mode);
+});
+
 $("#toggle-sidebar").addEventListener("click", openSidebar);
 $("#close-sidebar").addEventListener("click", closeSidebar);
 $("#sidebar-backdrop").addEventListener("click", closeSidebar);
@@ -1116,6 +1322,7 @@ async function loadModels() {
   applyTheme();
   loadConversations();
   await loadModels();
+  await loadAvailableTools();
   if (state.conversations.length === 0) {
     createConversation();
   } else {
