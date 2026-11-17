@@ -21,3 +21,6 @@
 - Add agentic mode. (uses local system provideed tools by a new special API endpoint). 
 - Add live logs off whats going on all the time
 - Add Cloudflare as a provider
+- Add voice / tss
+- Add multimodal (can use free models with puppeter) (can use small local models too)
+- Add (or test) 2 modes for Puppeteer (As service always running, or per demand) 

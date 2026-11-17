@@ -81,6 +81,15 @@
 
       <footer id="composer">
         <div class="composer-stack">
+
+          <div id="mode-bar" class="mode-bar">
+            <div class="mode-toggle">
+              <button type="button" class="mode-btn active" data-mode="chat">Chat</button>
+              <button type="button" class="mode-btn" data-mode="agent">Agent</button>
+            </div>
+            <div id="tools-panel" class="tools-panel hidden"></div>
+          </div>
+
           <div id="attachments-bar" class="attachments-bar" style="display:none"></div>
           <div class="composer-inner">
             <button id="attach-btn" class="icon-btn" title="Attach text file" aria-label="Attach file">

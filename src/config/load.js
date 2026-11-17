@@ -112,7 +112,7 @@ function loadConfig(configPath) {
   const raw = loadYaml(configPath);
   const secrets = readSecrets();
   const warnings = [];
-  const config = { providers: {}, routing: {}, settings: {} };
+  const config = { providers: {}, routing: {}, agent: {}, settings: {} };
 
   for (const [name, provider] of Object.entries(raw.providers || {})) {
     if (provider && provider.enabled === false) {
@@ -135,6 +135,9 @@ function loadConfig(configPath) {
     }
     config.providers[name] = resolved.value;
   }
+
+  const agent = tryResolve(raw.agent || {}, "agent");
+  config.agent = agent.ok ? agent.value : raw.agent || {};
 
   const settings = tryResolve(raw.settings || {}, "settings");
   config.settings = settings.ok ? settings.value : raw.settings || {};

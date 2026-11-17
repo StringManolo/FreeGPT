@@ -428,6 +428,30 @@ routing:
         model: "gemini-3.5-flash-lite"
         priority: 4
 
+# ─── Agent (FGTP) ─────────────────────────────────────────────────────
+agent:
+  limits:
+    max_iterations: 15
+    max_calls: 20
+    max_parallel: 3
+    format_corrections: 2
+    max_time_ms: 180000
+    max_result_bytes: 65536
+  tools:
+    web_search:
+      enabled: true
+    web_fetch:
+      enabled: true
+    filesystem:
+      enabled: false
+      allow_read: true
+      allow_write: false
+      allow_paths: []
+    terminal:
+      enabled: false
+    git:
+      enabled: false
+
 settings:
   retries_per_provider: 1
   request_timeout_ms: 30000
