@@ -146,6 +146,41 @@
     </div>
   </dialog>
 
+    <dialog id="context-dialog" class="wide-dialog">
+    <h2>Context too large</h2>
+    <p class="context-explainer">
+      No configured provider can process the full conversation.
+      Start a new one with a compacted context. The current conversation
+      stays intact in the sidebar.
+    </p>
+
+    <div class="context-options">
+      <div class="context-option">
+        <div class="context-option-title">Summarize the conversation</div>
+        <div class="context-option-desc">
+          Use an available model to compress the older messages into a summary.
+          The new conversation starts with the summary + your last message.
+        </div>
+        <button type="button" class="btn primary" id="context-summarize-btn">Summarize</button>
+      </div>
+
+      <div class="context-option">
+        <div class="context-option-title">Keep only the last N tokens</div>
+        <div class="context-option-desc">
+          Drop older messages entirely. Nothing is summarized.
+        </div>
+        <div class="context-token-input">
+          <label>Keep last <input type="number" id="context-keep-tokens" min="500" max="200000" step="500" value="4000" /> tokens</label>
+        </div>
+        <button type="button" class="btn primary" id="context-truncate-btn">Truncate</button>
+      </div>
+    </div>
+
+    <div class="dialog-actions">
+      <button type="button" class="btn ghost" id="context-cancel-btn">Cancel</button>
+    </div>
+  </dialog>
+
   <dialog id="export-dialog">
     <form method="dialog">
       <h2>Export</h2>

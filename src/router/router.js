@@ -2,6 +2,22 @@
 
 const { CooldownTracker } = require("./cooldown");
 
+function isContextError(record) {
+  if (!record || record.status !== "failed") return false;
+  if (record.errorStatus === 413) return true;
+  const msg = (record.error || "").toLowerCase();
+  return (
+    msg.includes("payload too large") ||
+    msg.includes("context length") ||
+    msg.includes("context_length") ||
+    msg.includes("too many tokens") ||
+    msg.includes("maximum context") ||
+    msg.includes("request too large") ||
+    msg.includes("exceeds the maximum") ||
+    msg.includes("too long")
+  );
+}
+
 class Router {
   constructor(config, providers) {
     this.config = config;
@@ -90,6 +106,7 @@ class Router {
         } catch (err) {
           record.status = "failed";
           record.error = err.message;
+          record.errorStatus = err.status || 0;
           record.durationMs = Date.now() - attemptStart;
 
           const status = err.status || 0;
@@ -111,6 +128,22 @@ class Router {
           }
         }
       }
+    }
+
+    // Todos los intentos fallaron por tamaño → error específico
+    if (attempts.length > 0 && attempts.every(isContextError)) {
+      const err = new Error(
+        "The conversation exceeds the context or token limits of all configured providers."
+      );
+      err.code = "CONTEXT_EXCEEDED";
+      err.attempts = attempts.map((a) => ({
+        provider: a.provider,
+        model: a.model,
+        attempt: a.attempt,
+        error: a.error,
+        errorStatus: a.errorStatus
+      }));
+      throw err;
     }
 
     const summary = errors.map((e) => `  - ${e}`).join("\n");

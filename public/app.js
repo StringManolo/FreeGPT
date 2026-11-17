@@ -611,7 +611,7 @@ async function streamAssistantResponse(conv) {
   const controller = new AbortController();
   state.abort = controller;
 
-  try {
+    try {
     const apiMessages = buildApiMessages(conv.messages);
 
     const res = await fetch(settings.endpoint, {
@@ -626,8 +626,14 @@ async function streamAssistantResponse(conv) {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || `HTTP ${res.status}`);
+      const errJson = await res.json().catch(() => ({}));
+      const apiErr = errJson.error || {};
+      const e = new Error(apiErr.message || `HTTP ${res.status}`);
+      if (apiErr.code === "context_exceeded") {
+        e.contextExceeded = true;
+        e.info = errJson.freegpt || {};
+      }
+      throw e;
     }
 
     const reader = res.body.getReader();
@@ -679,6 +685,18 @@ async function streamAssistantResponse(conv) {
     if (err.name === "AbortError") {
       assistant.status = "stopped";
       assistant.content += "\n\n_(stopped)_";
+    } else if (err.contextExceeded) {
+      // Quitar el placeholder del assistant y abrir el diálogo
+      conv.messages.pop();
+      saveConversations();
+      renderMessages();
+      showContextDialog(conv);
+      $("#status").textContent = "";
+      state.streaming = false;
+      state.abort = null;
+      $("#send").classList.remove("hidden");
+      $("#stop").classList.add("hidden");
+      return;
     } else {
       assistant.status = "error";
       assistant.content = `**Error:** ${err.message}`;
@@ -692,6 +710,7 @@ async function streamAssistantResponse(conv) {
     saveConversations();
     renderMessages();
   }
+
 }
 
 /* ---------- Files ---------- */
@@ -761,6 +780,192 @@ function formatConversationAsMarkdown(conv) {
     if (msg.content) lines.push(msg.content, "");
   }
   return lines.join("\n");
+}
+
+/* ---------- Context exceeded handling ---------- */
+
+let contextDialogState = { conv: null, info: null };
+
+function showContextDialog(conv, info) {
+  contextDialogState = { conv, info };
+  $("#context-dialog").showModal();
+}
+function hideContextDialog() {
+  $("#context-dialog").close();
+  contextDialogState = { conv: null, info: null };
+}
+
+function estimateTokens(text) {
+  if (!text) return 0;
+  return Math.ceil(String(text).length / 4);
+}
+function estimateMessageTokens(msg) {
+  let t = estimateTokens(msg.content);
+  if (msg.attachments?.length) {
+    for (const att of msg.attachments) t += estimateTokens(att.content);
+  }
+  return t;
+}
+function chunkMessagesByTokens(messages, maxPerChunk) {
+  const chunks = [];
+  let current = [];
+  let currentTokens = 0;
+  for (const msg of messages) {
+    const t = estimateMessageTokens(msg) + 4;
+    if (currentTokens + t > maxPerChunk && current.length > 0) {
+      chunks.push(current);
+      current = [];
+      currentTokens = 0;
+    }
+    current.push(msg);
+    currentTokens += t;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+async function callSummarize(messages) {
+  const flatText = messages
+    .map((m) => {
+      let text = `[${m.role}]: ${m.content || ""}`;
+      if (m.attachments?.length) {
+        text +=
+          "\n" +
+          m.attachments
+            .map((a) => `[attachment: ${a.name}]\n${a.content}`)
+            .join("\n");
+      }
+      return text;
+    })
+    .join("\n\n");
+
+  const res = await fetch(settings.endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: currentModelDefault(),
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a summarization assistant. Summarize the following conversation, preserving key technical decisions, code context, user requirements, and any open questions. Be concise but keep important details. Output only the summary."
+        },
+        { role: "user", content: flatText }
+      ],
+      stream: false
+    })
+  });
+
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
+async function compactBySummary(srcConv) {
+  const msgs = srcConv.messages;
+  if (msgs.length === 0) return;
+
+  let lastUserIdx = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === "user") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  if (lastUserIdx < 0) {
+    toast("No user message to continue from");
+    return;
+  }
+
+  const lastUser = msgs[lastUserIdx];
+  const toSummarize = msgs.slice(0, lastUserIdx);
+  if (toSummarize.length === 0) {
+    toast("Nothing to summarize");
+    return;
+  }
+
+  $("#status").textContent = "Summarizing…";
+
+  let combined;
+  try {
+    const chunks = chunkMessagesByTokens(toSummarize, 3000);
+    const summaries = [];
+    for (const chunk of chunks) {
+      const s = await callSummarize(chunk);
+      if (s) summaries.push(s);
+    }
+    if (summaries.length === 0) throw new Error("No summary produced");
+    combined = summaries.join("\n\n---\n\n");
+  } catch (err) {
+    $("#status").textContent = "";
+    toast(`Summarize failed: ${err.message}`);
+    return;
+  }
+
+  $("#status").textContent = "";
+
+  const newContent =
+    `[Summary of the previous conversation, which was too large to continue]:\n\n` +
+    `${combined}\n\n---\n\n` +
+    `Continuing from there, my next message:\n\n${lastUser.content}`;
+
+  const newConv = {
+    id: uid(),
+    title: `${srcConv.title} (continued)`,
+    model: srcConv.model,
+    messages: [{ id: uid(), role: "user", content: newContent, attachments: [] }],
+    pendingAttachments: []
+  };
+
+  state.conversations.unshift(newConv);
+  state.activeId = newConv.id;
+  saveConversations();
+  renderSidebar();
+  renderMessages();
+  toast("New conversation created. Review and send.");
+}
+
+function compactByTruncate(srcConv, maxTokens) {
+  const msgs = srcConv.messages;
+  if (msgs.length === 0) return;
+
+  const keep = [];
+  let tokens = 0;
+
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const msg = msgs[i];
+    const t = estimateMessageTokens(msg) + 4;
+    if (tokens + t > maxTokens && keep.length > 0) break;
+    keep.unshift(msg);
+    tokens += t;
+  }
+
+  if (keep.length === 0) {
+    toast("Not enough tokens to keep anything");
+    return;
+  }
+
+  const newConv = {
+    id: uid(),
+    title: `${srcConv.title} (continued)`,
+    model: srcConv.model,
+    messages: keep.map((m) => ({
+      ...m,
+      id: uid(),
+      attachments: m.attachments ? [...m.attachments] : []
+    })),
+    pendingAttachments: []
+  };
+
+  state.conversations.unshift(newConv);
+  state.activeId = newConv.id;
+  saveConversations();
+  renderSidebar();
+  renderMessages();
+  toast(`New conversation created with last ~${tokens} tokens`);
 }
 
 /* ---------- Event wiring ---------- */
@@ -864,6 +1069,23 @@ $("#messages").addEventListener("click", (e) => {
   if (!msgEl) return;
   handleMessageAction(msgEl.dataset.msgId, btn.dataset.action);
 });
+
+
+$("#context-cancel-btn").addEventListener("click", hideContextDialog);
+$("#context-summarize-btn").addEventListener("click", async () => {
+  const { conv } = contextDialogState;
+  if (!conv) return;
+  hideContextDialog();
+  await compactBySummary(conv);
+});
+$("#context-truncate-btn").addEventListener("click", () => {
+  const { conv } = contextDialogState;
+  if (!conv) return;
+  const tokens = Number($("#context-keep-tokens").value) || 4000;
+  hideContextDialog();
+  compactByTruncate(conv, tokens);
+});
+
 
 /* ---------- Init ---------- */
 

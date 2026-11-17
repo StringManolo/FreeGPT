@@ -110,7 +110,7 @@ async function handleChat(req, res, router) {
 
   const { model, messages, stream, ...options } = body;
 
-  try {
+    try {
     const { completion, meta } = await router.chatCompletion({
       model,
       messages,
@@ -122,9 +122,21 @@ async function handleChat(req, res, router) {
     completion.freegpt = meta;
     return sendJson(res, 200, completion);
   } catch (err) {
+    if (err.code === "CONTEXT_EXCEEDED") {
+      return sendJson(res, 413, {
+        error: {
+          message: err.message,
+          type: "context_length_exceeded",
+          code: "context_exceeded",
+          param: null
+        },
+        freegpt: { attempts: err.attempts }
+      });
+    }
     console.error("[freegpt] Router error:", err.message);
     return sendError(res, 502, err.message, "provider_error");
   }
+
 }
 
 function handleModels(res, config) {
