@@ -7,7 +7,7 @@
 - Handle conversations seamensly between different models. (share full history if needed)
 - Create resumes for new conversations
 - Allow client to chose the specific model from a list of options
-- Add code highlight
+- Add code highlight (include language detection like Deepseek web does)
 - Add testing
 - Port to React if needed
 - Detect usage / max size per prompt per model
@@ -15,3 +15,7 @@
 - Allow multiple API keys per model/API (if one fails, it has backup). 
 - Add option to smart select model by tast (for example if you select Code, uses the best model available for that task)
 - Add support to multiple files
+- Add support for local models
+- Fix current model and API versions (seek for best available free models)
+- Add SMART routing. Instead of routing for priority, uses a fast model to classify the task and select the best avaiilable models (returns models order by priority)
+- Add agentic mode. (uses local system provideed tools by a new special API endpoint). 

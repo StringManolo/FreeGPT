@@ -6,9 +6,8 @@ const { GeminiAdapter } = require("./gemini");
 const { GenericOpenAIAdapter } = require("./generic-openai");
 
 const ADAPTER_REGISTRY = {
-  openai_compatible: null, // resuelto por proveedor
+  openai_compatible: null,
   gemini_native: GeminiAdapter
-  // "web_puppeteer": WebPuppeteerAdapter  // futuro
 };
 
 function isPlaceholder(key) {
@@ -16,20 +15,10 @@ function isPlaceholder(key) {
 }
 
 function collectKeys(providerConfig) {
-  // Soporta tanto `api_key` singular como `api_keys` array (multi-cuenta).
   const keys = [];
-  if (Array.isArray(providerConfig.api_keys)) {
-    keys.push(...providerConfig.api_keys);
-  }
-  if (providerConfig.api_key) {
-    keys.push(providerConfig.api_key);
-  }
+  if (Array.isArray(providerConfig.api_keys)) keys.push(...providerConfig.api_keys);
+  if (providerConfig.api_key) keys.push(providerConfig.api_key);
   return keys.filter(Boolean);
-}
-
-function hasOnlyPlaceholders(providerConfig) {
-  const keys = collectKeys(providerConfig);
-  return keys.length > 0 && keys.every(isPlaceholder);
 }
 
 function buildProviders(config) {
@@ -38,8 +27,12 @@ function buildProviders(config) {
   for (const [name, providerConfig] of Object.entries(config.providers || {})) {
     if (providerConfig.enabled === false) continue;
 
-    // Descartar si todas las keys son placeholders YOUR_...
-    if (hasOnlyPlaceholders(providerConfig)) {
+    const keys = collectKeys(providerConfig);
+    if (keys.length === 0) {
+      console.warn(`Skipping provider "${name}": no API keys configured.`);
+      continue;
+    }
+    if (keys.every(isPlaceholder)) {
       console.warn(
         `Skipping provider "${name}": placeholder API key(s). ` +
           `Set a real key with: freegpt key ${name} <key>`
@@ -48,18 +41,21 @@ function buildProviders(config) {
     }
 
     let AdapterClass = ADAPTER_REGISTRY[providerConfig.type];
-
     if (providerConfig.type === "openai_compatible") {
       AdapterClass = pickOpenAICompatibleAdapter(name, providerConfig);
     }
-
     if (!AdapterClass) {
       console.warn(`Skipping provider "${name}": unknown type "${providerConfig.type}".`);
       continue;
     }
 
+    const filteredConfig = {
+      ...providerConfig,
+      api_keys: keys.filter((k) => !isPlaceholder(k))
+    };
+
     try {
-      providers.set(name, new AdapterClass(name, providerConfig));
+      providers.set(name, new AdapterClass(name, filteredConfig));
     } catch (err) {
       console.warn(`Skipping provider "${name}": ${err.message}`);
     }
