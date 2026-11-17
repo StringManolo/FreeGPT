@@ -25,3 +25,6 @@
 - Add multimodal (can use free models with puppeter) (can use small local models too)
 - Add (or test) 2 modes for Puppeteer (As service always running, or per demand) 
 - Add real streaming (with pause, continue, stop etc)
+- PRIORITY: Use secure folder for agent (probably a proot is needed or something similar)
+- Add ability to install tools in the system (also install them if any of of the reqjired ones are missing, like git)
+- Add a Free Agent mode. (no limits, just a sleep between calls to don't exhaust resources or providers)

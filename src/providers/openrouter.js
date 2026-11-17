@@ -8,7 +8,7 @@ class OpenRouterAdapter extends ProviderAdapter {
     this.baseUrl = (config.base_url || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
   }
 
-  async chatCompletion({ model, messages, options = {}, apiKey }) {
+  async chatCompletion({ model, messages, options = {}, apiKey, signal }) {
     const key = apiKey || this.getDefaultKey();
     if (!key) throw new Error(`No API key available for "${this.name}".`);
 
@@ -21,7 +21,8 @@ class OpenRouterAdapter extends ProviderAdapter {
         "HTTP-Referer": "https://github.com/stringmanolo/freegpt",
         "X-Title": "FreeGPT"
       },
-      body: JSON.stringify({ model, messages, ...options })
+      body: JSON.stringify({ model, messages, ...options }),
+      signal
     });
 
     if (!response.ok) {

@@ -1,7 +1,9 @@
 'use strict';
 
-// Importar cada módulo ejecuta su registerTool().
 require('./web-search');
 require('./web-fetch');
+require('./filesystem');
+require('./git');
+require('./terminal');
 
 module.exports = {};

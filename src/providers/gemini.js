@@ -48,7 +48,7 @@ class GeminiAdapter extends ProviderAdapter {
     ).replace(/\/+$/, "");
   }
 
-  async chatCompletion({ model, messages, options = {}, apiKey }) {
+  async chatCompletion({ model, messages, options = {}, apiKey, signal }) {
     const key = apiKey || this.getDefaultKey();
     if (!key) throw new Error(`No API key available for "${this.name}".`);
 
@@ -64,7 +64,8 @@ class GeminiAdapter extends ProviderAdapter {
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal
     });
 
     if (!response.ok) {
