@@ -1,30 +1,30 @@
 "use strict";
 
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 const { loadConfig } = require("./config/load");
 const { buildProviders } = require("./providers");
 const { Router } = require("./router/router");
 
-const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_BODY_BYTES = 10 * 1024 * 1024;
+const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
-/**
- * Start the FreeGPT HTTP server.
- * Returns a Promise that resolves to the http.Server once listening.
- *
- * @param {object} opts
- * @param {string} opts.configPath Absolute path to config.yaml
- * @param {number} [opts.port] Override port
- * @param {string} [opts.host] Override host
- */
-function start({ configPath, port, host } = {}) {
-  if (!configPath) {
-    throw new Error("start(): 'configPath' is required.");
-  }
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon"
+};
+
+function start({ configPath, port, host, ui = false } = {}) {
+  if (!configPath) throw new Error("start(): 'configPath' is required.");
 
   const { config, warnings } = loadConfig(configPath);
-  for (const w of warnings) {
-    console.warn(`[freegpt] config warning: ${w}`);
-  }
+  for (const w of warnings) console.warn(`[freegpt] config warning: ${w}`);
 
   const providers = buildProviders(config);
   if (providers.size === 0) {
@@ -38,7 +38,9 @@ function start({ configPath, port, host } = {}) {
   const listenPort = port ?? config.settings?.port ?? 3100;
   const listenHost = host ?? config.settings?.host ?? "127.0.0.1";
 
-  const server = http.createServer((req, res) => handle(req, res, router, config));
+  const server = http.createServer((req, res) =>
+    handle(req, res, router, config, ui)
+  );
 
   const shutdown = (signal) => {
     console.log(`[freegpt] Received ${signal}, shutting down...`);
@@ -53,33 +55,24 @@ function start({ configPath, port, host } = {}) {
     server.listen(listenPort, listenHost, () => {
       server.removeListener("error", reject);
       console.log(`[freegpt] Listening on http://${listenHost}:${listenPort}`);
-      console.log(
-        `[freegpt] OpenAI-compatible endpoint: http://${listenHost}:${listenPort}/v1/chat/completions`
-      );
+      if (ui) console.log(`[freegpt] Web UI: http://${listenHost}:${listenPort}/`);
       resolve(server);
     });
   });
 }
 
-/* ------------------------------------------------------------------ */
-/* Request handling                                                    */
-/* ------------------------------------------------------------------ */
-
-async function handle(req, res, router, config) {
+async function handle(req, res, router, config, ui) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 
-  if (req.method === "OPTIONS") {
-    res.writeHead(204).end();
-    return;
-  }
+  if (req.method === "OPTIONS") return res.writeHead(204).end();
 
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-  const pathname = url.pathname.replace(/\/+$/, "") || "/";
+  const pathname = url.pathname;
 
   try {
-    if (req.method === "GET" && (pathname === "/" || pathname === "/health")) {
+    if (req.method === "GET" && pathname === "/health") {
       return sendJson(res, 200, { status: "ok", service: "freegpt" });
     }
 
@@ -91,14 +84,16 @@ async function handle(req, res, router, config) {
       return await handleChat(req, res, router);
     }
 
+    if (ui && req.method === "GET") {
+      return serveStatic(res, pathname);
+    }
+
     return sendError(res, 404, `Unknown route: ${req.method} ${pathname}`, "not_found");
   } catch (err) {
     console.error("[freegpt] Handler error:", err);
     if (!res.headersSent) {
       sendError(res, 500, err.message || "Internal error", "internal_error");
-    } else {
-      res.end();
-    }
+    } else res.end();
   }
 }
 
@@ -107,26 +102,24 @@ async function handleChat(req, res, router) {
   try {
     body = await readJson(req);
   } catch (err) {
-    return sendError(
-      res,
-      400,
-      `Invalid JSON body: ${err.message}`,
-      "invalid_request_error"
-    );
+    return sendError(res, 400, `Invalid JSON body: ${err.message}`, "invalid_request_error");
   }
 
   const problem = validateChatBody(body);
-  if (problem) {
-    return sendError(res, 400, problem, "invalid_request_error");
-  }
+  if (problem) return sendError(res, 400, problem, "invalid_request_error");
 
   const { model, messages, stream, ...options } = body;
 
   try {
-    const completion = await router.chatCompletion({ model, messages, options });
-    if (stream) {
-      return streamAsSse(res, completion);
-    }
+    const { completion, meta } = await router.chatCompletion({
+      model,
+      messages,
+      options
+    });
+
+    if (stream) return streamAsSse(res, completion, meta);
+
+    completion.freegpt = meta;
     return sendJson(res, 200, completion);
   } catch (err) {
     console.error("[freegpt] Router error:", err.message);
@@ -145,9 +138,19 @@ function handleModels(res, config) {
   sendJson(res, 200, { object: "list", data });
 }
 
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
+function serveStatic(res, pathname) {
+  const safe = pathname === "/" ? "/index.html" : pathname;
+  const filePath = path.join(PUBLIC_DIR, path.normalize(safe));
+  if (!filePath.startsWith(PUBLIC_DIR)) {
+    return sendError(res, 403, "Forbidden", "forbidden");
+  }
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    return sendError(res, 404, "Not found", "not_found");
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+  fs.createReadStream(filePath).pipe(res);
+}
 
 function readJson(req) {
   return new Promise((resolve, reject) => {
@@ -189,15 +192,9 @@ function validateChatBody(body) {
   }
   for (let i = 0; i < body.messages.length; i++) {
     const m = body.messages[i];
-    if (!m || typeof m !== "object") {
-      return `messages[${i}] must be an object.`;
-    }
-    if (typeof m.role !== "string") {
-      return `messages[${i}].role must be a string.`;
-    }
-    if (typeof m.content !== "string") {
-      return `messages[${i}].content must be a string.`;
-    }
+    if (!m || typeof m !== "object") return `messages[${i}] must be an object.`;
+    if (typeof m.role !== "string") return `messages[${i}].role must be a string.`;
+    if (typeof m.content !== "string") return `messages[${i}].content must be a string.`;
   }
   return null;
 }
@@ -222,11 +219,7 @@ function sendError(res, status, message, code = "error") {
   });
 }
 
-/**
- * Simulated SSE stream built from a complete response.
- * Real per-adapter streaming can be added later without changing this API.
- */
-function streamAsSse(res, completion) {
+function streamAsSse(res, completion, meta) {
   const id = completion.id || `chatcmpl-${Date.now()}`;
   const created = completion.created || Math.floor(Date.now() / 1000);
   const model = completion.model || "unknown";
@@ -239,6 +232,8 @@ function streamAsSse(res, completion) {
   });
 
   const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+  send({ freegpt: meta });
 
   send({
     id,
@@ -256,11 +251,7 @@ function streamAsSse(res, completion) {
       created,
       model,
       choices: [
-        {
-          index: 0,
-          delta: { content: content.slice(i, i + CHUNK) },
-          finish_reason: null
-        }
+        { index: 0, delta: { content: content.slice(i, i + CHUNK) }, finish_reason: null }
       ]
     });
   }

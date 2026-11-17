@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FreeGPT</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css" />
+</head>
+<body>
+  <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+  <div id="app">
+    <aside id="sidebar">
+      <div class="sidebar-head">
+        <button id="close-sidebar" class="btn ghost icon-only mobile-only" title="Close" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+        <button id="new-chat" class="btn primary new-chat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          <span>New chat</span>
+        </button>
+      </div>
+      <nav id="conversations"></nav>
+      <div class="sidebar-foot">
+        <button id="open-settings" class="btn ghost settings-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span>Settings</span>
+        </button>
+        <button id="toggle-theme" class="btn ghost theme-btn" title="Toggle theme">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"></circle>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header id="chat-header">
+        <div class="header-brand">
+          <button id="toggle-sidebar" class="btn ghost icon-only mobile-only" title="Menu" aria-label="Toggle conversations">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+          <span class="brand-dot"></span>
+          <span class="brand-title">FreeGPT</span>
+          <span id="status"></span>
+        </div>
+        <div class="header-actions">
+          <button id="export-btn" class="btn ghost icon-only" title="Export conversations" aria-label="Export">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </button>
+          <button id="header-new-chat" class="btn primary small" title="New chat">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span class="hide-on-mobile">New chat</span>
+          </button>
+        </div>
+      </header>
+
+      <section id="messages"></section>
+
+      <footer id="composer">
+        <div class="composer-inner">
+          <button id="attach-btn" class="icon-btn" title="Attach text file" aria-label="Attach file">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+            </svg>
+          </button>
+          <input type="file" id="file-input" hidden accept=".txt,.md,.js,.ts,.py,.json,.csv,.html,.css,.xml,.yaml,.yml,.sh,.rb,.go,.rs,.java,.c,.cpp,.h">
+          <select id="model-select" class="model-select-inline" aria-label="Model"></select>
+          <textarea id="input" rows="1" placeholder="Message FreeGPT…" title="Ctrl+Enter to send"></textarea>
+          <button id="send" class="btn primary send-btn" title="Send (Enter)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="19" x2="12" y2="5"></line>
+              <polyline points="5 12 12 5 19 12"></polyline>
+            </svg>
+          </button>
+          <button id="stop" class="btn danger stop-btn hidden" title="Stop">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+            </svg>
+          </button>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <dialog id="settings-dialog">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <label>
+        <span>Endpoint</span>
+        <input id="setting-endpoint" type="url" />
+      </label>
+      <label class="row"><input id="setting-show-process" type="checkbox" /> Show process timeline</label>
+      <label class="row"><input id="setting-show-model" type="checkbox" /> Show model badge</label>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn ghost">Cancel</button>
+        <button value="save" class="btn primary" id="save-settings">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="edit-dialog">
+    <form method="dialog">
+      <h2>Edit message</h2>
+      <textarea id="edit-text" rows="6"></textarea>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn ghost">Cancel</button>
+        <button value="save" class="btn primary" id="save-edit">Save &amp; resend</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="export-dialog">
+    <form method="dialog">
+      <h2>Export</h2>
+      <label class="row"><input type="radio" name="export-scope" value="current" checked /> Current conversation</label>
+      <label class="row"><input type="radio" name="export-scope" value="all" /> All conversations</label>
+      <label>
+        <span>Format</span>
+        <select id="export-format">
+          <option value="md">Markdown</option>
+          <option value="json">JSON</option>
+        </select>
+      </label>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn ghost">Cancel</button>
+        <button value="export" class="btn primary" id="do-export">Export</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/common.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

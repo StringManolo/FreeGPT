@@ -8,6 +8,7 @@ const { runServe } = require("./cli/commands/serve");
 const { runDoctor } = require("./cli/commands/doctor");
 const { runKey } = require("./cli/commands/key");
 const { runSetup } = require("./cli/commands/setup");
+const { runUi } = require("./cli/commands/ui");
 
 (async () => {
   const cli = await parseCLI();
@@ -30,6 +31,9 @@ const { runSetup } = require("./cli/commands/setup");
       break;
     case "serve":
       await runServe(cli);
+      break;
+    case "ui":
+      await runUi(cli);
       break;
     case "doctor":
       await runDoctor(cli);
@@ -65,6 +69,7 @@ function printHelp(cli) {
   console.log("");
   console.log(c.bold("Commands:"));
   console.log("  serve      Start the OpenAI-compatible API (default)");
+  console.log("  ui         Start the gateway and serve the web UI");
   console.log("  init       Create the config from the demo template");
   console.log("  doctor     Validate config and check provider health");
   console.log("  key        Store an API key in secrets.yaml");
@@ -75,10 +80,13 @@ function printHelp(cli) {
   console.log("  freegpt key groq gsk_xxxxxxxxxxxxxxxx");
   console.log("  freegpt doctor");
   console.log("  freegpt serve");
+  console.log("  freegpt ui");
+  console.log("  freegpt serve --ui");
   console.log("");
   console.log(c.bold("Options:"));
   console.log("  -h, --help           Show this help");
   console.log("  -v, --version        Show version");
+  console.log("  -u, --ui             Serve the web UI (with serve)");
   console.log("  --config <path>      Use a custom config file");
   console.log("  --port <number>      Override the listening port");
 }

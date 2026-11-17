@@ -3,10 +3,6 @@
 const { CooldownTracker } = require("./cooldown");
 
 class Router {
-  /**
-   * @param {object} config Parsed config.yaml
-   * @param {Map<string, ProviderAdapter>} providers From buildProviders()
-   */
   constructor(config, providers) {
     this.config = config;
     this.providers = providers;
@@ -17,25 +13,16 @@ class Router {
     this.timeoutMs = config.settings?.request_timeout_ms ?? 30_000;
   }
 
-  /**
-   * Return the ordered (provider, model) chain for a logical model name.
-   * If the name is not a logical group, treat it as "provider/model" or plain model.
-   */
   resolveChain(logicalModel) {
     const groups = this.config.routing?.model_groups || {};
     const group = groups[logicalModel];
-
     if (group) {
       return [...group].sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
     }
-
-    // Allow "provider:model" syntax for direct routing.
     if (logicalModel.includes(":")) {
       const [provider, model] = logicalModel.split(":", 2);
       return [{ provider, model, priority: 1 }];
     }
-
-    // Unknown logical name: try every provider that advertises it.
     const chain = [];
     for (const [name, adapter] of this.providers.entries()) {
       const models = adapter.config.models || [];
@@ -46,13 +33,8 @@ class Router {
     return chain;
   }
 
-  /**
-   * Route a chat completion request through the configured chain.
-   * Returns the first successful OpenAI-shaped response.
-   */
   async chatCompletion({ model: logicalModel, messages, options = {} }) {
     const chain = this.resolveChain(logicalModel);
-
     if (chain.length === 0) {
       throw new Error(
         `No provider configured for model "${logicalModel}". ` +
@@ -60,6 +42,8 @@ class Router {
       );
     }
 
+    const startTime = Date.now();
+    const attempts = [];
     const errors = [];
 
     for (const step of chain) {
@@ -68,7 +52,6 @@ class Router {
         errors.push(`${step.provider}: provider not loaded`);
         continue;
       }
-
       if (this.cooldown.isCoolingDown(step.provider)) {
         const ms = this.cooldown.remainingMs(step.provider);
         errors.push(`${step.provider}: cooling down for ${ms} ms`);
@@ -76,18 +59,39 @@ class Router {
       }
 
       for (let attempt = 0; attempt <= this.retriesPerProvider; attempt++) {
+        const attemptStart = Date.now();
+        const record = {
+          provider: step.provider,
+          model: step.model,
+          attempt: attempt + 1,
+          status: "trying",
+          startedAt: attemptStart
+        };
+        attempts.push(record);
+
         try {
           const result = await this.withTimeout(
-            adapter.chatCompletion({
-              model: step.model,
-              messages,
-              options
-            }),
+            adapter.chatCompletion({ model: step.model, messages, options }),
             this.timeoutMs
           );
+          record.status = "ok";
+          record.durationMs = Date.now() - attemptStart;
           this.cooldown.recordSuccess(step.provider);
-          return result;
+          return {
+            completion: result,
+            meta: {
+              logicalModel,
+              provider: step.provider,
+              model: step.model,
+              attempts,
+              totalMs: Date.now() - startTime
+            }
+          };
         } catch (err) {
+          record.status = "failed";
+          record.error = err.message;
+          record.durationMs = Date.now() - attemptStart;
+
           const status = err.status || 0;
           const isFatal = status === 401 || status === 403;
           const isRateLimit = status === 429;
@@ -98,17 +102,13 @@ class Router {
           );
 
           if (isFatal) {
-            // Bad key: no point retrying; also cool it down hard.
             this.cooldown.recordFailure(step.provider, 5 * 60_000);
             break;
           }
-
           if (isRateLimit || isTimeout) {
             this.cooldown.recordFailure(step.provider, 60_000);
-            break; // move to next provider immediately
+            break;
           }
-
-          // Otherwise retry, then move on.
         }
       }
     }
@@ -124,15 +124,14 @@ class Router {
         err.code = "ETIMEDOUT";
         reject(err);
       }, ms);
-
       promise.then(
-        (value) => {
+        (v) => {
           clearTimeout(timer);
-          resolve(value);
+          resolve(v);
         },
-        (err) => {
+        (e) => {
           clearTimeout(timer);
-          reject(err);
+          reject(e);
         }
       );
     });
