@@ -4,10 +4,12 @@
   "description": "Free AI provider gateway with an OpenAI-compatible API",
   "main": "src/server.js",
   "bin": {
-    "freegpt": "src/cli.js"
+    "freegpt": "src/cli.js",
+    "freegpt-client": "bin/freegpt-client.sh"
   },
   "files": [
     "src/",
+    "bin/",
     "config.demo.yaml",
     "README.md"
   ],
