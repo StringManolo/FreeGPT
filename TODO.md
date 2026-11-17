@@ -20,3 +20,4 @@
 - Add SMART routing. Instead of routing for priority, uses a fast model to classify the task and select the best avaiilable models (returns models order by priority)
 - Add agentic mode. (uses local system provideed tools by a new special API endpoint). 
 - Add live logs off whats going on all the time
+- Add Cloudflare as a provider
