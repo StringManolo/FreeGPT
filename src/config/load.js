@@ -50,6 +50,37 @@ function tryResolve(value, path) {
   }
 }
 
+function collectKeysFromProvider(provider, secretsEntry) {
+  const keys = [];
+
+  if (secretsEntry) {
+    if (Array.isArray(secretsEntry.api_keys) && secretsEntry.api_keys.length > 0) {
+      keys.push(...secretsEntry.api_keys);
+    } else if (secretsEntry.api_key) {
+      keys.push(secretsEntry.api_key);
+    }
+  }
+
+  if (keys.length === 0) {
+    if (Array.isArray(provider.api_keys) && provider.api_keys.length > 0) {
+      keys.push(...provider.api_keys);
+    } else if (provider.api_key) {
+      keys.push(provider.api_key);
+    }
+  }
+
+  return keys;
+}
+
+function resolveKeyString(k) {
+  if (typeof k !== "string") return null;
+  if (k.startsWith(ENV_PREFIX)) {
+    const v = process.env[k.slice(ENV_PREFIX.length)];
+    return v || null;
+  }
+  return k;
+}
+
 function validateConfig(config) {
   const warnings = [];
   if (!config.providers || typeof config.providers !== "object") {
@@ -64,8 +95,11 @@ function validateConfig(config) {
     if (!Array.isArray(p.models) || p.models.length === 0) {
       warnings.push(`Provider "${name}" has no models listed.`);
     }
-    if (typeof p.api_key === "string" && p.api_key.startsWith("YOUR_")) {
-      warnings.push(`Provider "${name}" still has a placeholder API key.`);
+    if (Array.isArray(p.api_keys)) {
+      const placeholders = p.api_keys.filter((k) => typeof k === "string" && k.startsWith("YOUR_"));
+      if (placeholders.length > 0) {
+        warnings.push(`Provider "${name}" has ${placeholders.length} placeholder API key(s).`);
+      }
     }
   }
   if (!config.routing || !config.routing.model_groups) {
@@ -86,12 +120,13 @@ function loadConfig(configPath) {
       continue;
     }
 
-    // Secrets override config.yaml.
-    const candidate = { ...provider };
-    const secretKey = secrets.providers?.[name]?.api_key;
-    if (secretKey) {
-      candidate.api_key = secretKey; // literal key; resolveEnv leaves it untouched
-    }
+    const secretEntry = secrets.providers?.[name];
+    const rawKeys = collectKeysFromProvider(provider, secretEntry);
+    const resolvedKeys = rawKeys.map(resolveKeyString).filter(Boolean);
+
+    const { api_key, ...rest } = provider;
+    const candidate = { ...rest, api_keys: resolvedKeys };
+    delete candidate.api_key;
 
     const resolved = tryResolve(candidate, `providers.${name}`);
     if (!resolved.ok) {

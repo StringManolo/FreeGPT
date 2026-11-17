@@ -27,27 +27,46 @@ function writeSecrets(secrets) {
     "# Managed by `freegpt key`. Takes precedence over config.yaml.\n" +
     yaml.dump(secrets, { lineWidth: -1 });
   fs.writeFileSync(SECRETS_FILE, text, "utf8");
-  try {
-    fs.chmodSync(SECRETS_FILE, 0o600);
-  } catch (_) {
-    // chmod is a no-op on Windows.
-  }
+  try { fs.chmodSync(SECRETS_FILE, 0o600); } catch (_) {}
 }
 
 function setProviderKey(providerName, apiKey) {
   const secrets = readSecrets();
   if (!secrets.providers[providerName]) secrets.providers[providerName] = {};
-  secrets.providers[providerName].api_key = apiKey;
+  const p = secrets.providers[providerName];
+
+  if (Array.isArray(p.api_keys) && p.api_keys.length > 0) {
+    p.api_keys[0] = apiKey;
+  } else {
+    p.api_key = apiKey;
+  }
+  writeSecrets(secrets);
+  return SECRETS_FILE;
+}
+
+function setProviderKeyAt(providerName, index, apiKey) {
+  const secrets = readSecrets();
+  if (!secrets.providers[providerName]) secrets.providers[providerName] = {};
+  const p = secrets.providers[providerName];
+
+  if (p.api_key && !p.api_keys) {
+    p.api_keys = [p.api_key];
+    delete p.api_key;
+  }
+  if (!Array.isArray(p.api_keys)) p.api_keys = [];
+  p.api_keys[index] = apiKey;
   writeSecrets(secrets);
   return SECRETS_FILE;
 }
 
 function listProviderKeys() {
   const secrets = readSecrets();
-  return Object.entries(secrets.providers).map(([name, p]) => ({
-    name,
-    hasKey: Boolean(p && p.api_key)
-  }));
+  return Object.entries(secrets.providers).map(([name, p]) => {
+    const keys = [];
+    if (Array.isArray(p.api_keys)) keys.push(...p.api_keys);
+    if (p.api_key) keys.unshift(p.api_key);
+    return { name, count: keys.filter(Boolean).length, hasKey: keys.some(Boolean) };
+  });
 }
 
-module.exports = { readSecrets, writeSecrets, setProviderKey, listProviderKeys };
+module.exports = { readSecrets, writeSecrets, setProviderKey, setProviderKeyAt, listProviderKeys };

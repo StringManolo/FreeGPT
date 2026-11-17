@@ -2,38 +2,327 @@
 # Copy this file to ~/.freegpt/config.yaml and fill in your credentials.
 # The FreeGPT CLI copies it automatically if ~/.freegpt/config.yaml does not exist.
 # The CLI must never overwrite an existing config.yaml.
+#
+# Last reviewed: 2026-11-17 after a `freegpt doctor --verbose` run.
+# Only models that returned 200 OK with the expected answer are active.
+# Broken models are listed commented-out per provider, so they can be
+# re-checked later. Free model lists rotate weekly: rerun `freegpt doctor`
+# after editing and remove whatever returns 404/410/timeout.
+#
+# ─── Other free providers worth adding (not enabled here) ───────────────
+# Cloudflare Workers AI → no card, 10,000 neurons/day (~130K output tokens).
+#   base_url: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1
+#   Needs your account_id in the URL; FreeGPT does not substitute variables
+#   inside base_url yet, so you'd have to hardcode it or add a ${VAR} resolver.
+#   The newest Kimi/GLM/DeepSeek builds there require a paid method.
+# Dead ends as of Nov 2026: GitHub Models (retired Jul 30, 2026),
+#   Hugging Face router (no free credits), Together AI ($15 minimum),
+#   Cerebras (needs a verified payment method for the $5 trial).
 
 providers:
+  # ─── Groq ─────────────────────────────────────────────────────────────
+  # Free tier: 30 RPM · 1,000 RPD · 8,000 TPM · 200,000 TPD per model.
+  # No credit card. Models rotate often; check https://console.groq.com/docs/models
+  # Doctor 2026-11-17: all 6 combos (2 keys × 3 models) passed.
   groq:
     type: "openai_compatible"
     base_url: "https://api.groq.com/openai/v1"
-    api_key: "env.GROQ_API_KEY"
+    api_keys:
+      - "env.GROQ_API_KEY"
+      # - "env.GROQ_API_KEY_2"
+      # - "gsk_literal_key_here"
+    key_strategy: "sequential"
     models:
-      - "openai/gpt-oss-20b"
       - "openai/gpt-oss-120b"
+      - "openai/gpt-oss-20b"
+      - "qwen/qwen3.8-27b"
+    limits:
+      "openai/gpt-oss-120b":
+        rpm: 30
+        rpd: 1000
+        tpm: 8000
+        tpd: 200000
+      "openai/gpt-oss-20b":
+        rpm: 30
+        rpd: 1000
+        tpm: 8000
+        tpd: 200000
+      "qwen/qwen3.8-27b":
+        rpm: 30
+        rpd: 1000
+        tpm: 8000
+        tpd: 200000
 
-  cerebras:
+  # ─── NVIDIA NIM ───────────────────────────────────────────────────────
+  # Free for prototyping with a Developer Program account, no card.
+  # Rate varies per model; "40 RPM" is a community figure, not official.
+  # Full list: https://build.nvidia.com/models (filter: Free Endpoint)
+  # Doctor 2026-11-17: 3 of 4 active models passed. stepfun-ai/step-5-preview
+  # timed out at 20s and has been removed. The remaining 3 are solid.
+  nvidia:
     type: "openai_compatible"
-    base_url: "https://api.cerebras.ai/v1"
-    api_key: "YOUR_CEREBRAS_API_KEY_HERE"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    api_keys:
+      - "env.NVIDIA_API_KEY"
+    key_strategy: "balanced"
     models:
-      - "llama3.1-8b"
-      - "llama3.1-70b"
+      - "nvidia/nemotron-3-ultra-550b-a55b"       # 1M ctx, strong general reasoning
+      - "nvidia/nemotron-3.5-super-vl-120b-a12b"  # agentic + coding, early access
+      - "nvidia/nemotron-3.5-lightning-30b-a3b"   # fastest, good for fast-chat
+    # Removed 2026-11-17:
+    #   - "stepfun-ai/step-5-preview"       (timeout 20s, endpoint overloaded)
+    # Retired or not available as of 2026-11-17:
+    #   - "moonshotai/kimi-k3.1-pro"        (404, wrong ID)
+    #   - "deepseek-ai/deepseek-v4.1-flash" (410, EOL 2026-11-16)
+    #   - "minimaxai/minimax-m3.1-flash"    (timeout)
+    #   - "z-ai/glm-5.3-flash"              (timeout)
+    #   - "google/gemma-4-31b-it"           (timeout)
+    #   - "meta/muse-glimmer-30b"           (timeout)
+    limits:
+      "nvidia/nemotron-3-ultra-550b-a55b":
+        rpm: 40
+        rpd: 10000
+        tpm: 0
+        tpd: 0
+      "nvidia/nemotron-3.5-super-vl-120b-a12b":
+        rpm: 40
+        rpd: 10000
+        tpm: 0
+        tpd: 0
+      "nvidia/nemotron-3.5-lightning-30b-a3b":
+        rpm: 40
+        rpd: 10000
+        tpm: 0
+        tpd: 0
 
+  # ─── Google Gemini ───────────────────────────────────────────────────
+  # Free tier limits are per Google Cloud project, NOT per API key.
+  # Rotating keys from the same project does not multiply quota.
+  # Doctor 2026-11-17: both flash-lite models passed.
+  # gemini-3.1-flash-lite took 13.7s — usable, but keep it last in fast-chat.
   gemini:
     type: "gemini_native"
-    api_key: "YOUR_GOOGLE_AI_STUDIO_API_KEY_HERE"
+    api_keys:
+      - "env.GEMINI_API_KEY"
+      # - "env.GEMINI_API_KEY_2"
+    key_strategy: "sequential"
     models:
-      - "gemini-2.5-flash-lite"
+      - "gemini-3.5-flash-lite"
+      - "gemini-3.1-flash-lite"
+    # Re-check later:
+    #   - "gemini-3.8-flash"        (503 high demand — transient)
+    #   - "gemini-3.6-flash"        (timeout)
+    # Retired: gemini-2.5-pro (replacement is gemini-3.1-pro-preview)
+    limits:
+      "gemini-3.5-flash-lite":
+        rpm: 15
+        rpd: 500
+        tpm: 250000
+        tpd: 0
+      "gemini-3.1-flash-lite":
+        rpm: 15
+        rpd: 500
+        tpm: 250000
+        tpd: 0
 
+  # ─── OpenRouter ──────────────────────────────────────────────────────
+  # Only `:free` suffix models are usable without credits.
+  # Limits are per account, not per key: 20 RPM and 50 RPD
+  # (1,000 RPD after a one-time $10 credit purchase).
+  # Doctor 2026-11-17: all 8 active models passed.
   openrouter:
     type: "openai_compatible"
     base_url: "https://openrouter.ai/api/v1"
-    api_key: "env.OPENROUTER_API_KEY"
+    api_keys:
+      - "env.OPENROUTER_API_KEY"
+    key_strategy: "balanced"
     models:
-      - "meta-llama/llama-3.3-70b-instruct:free"
-      - "deepseek/deepseek-chat-v3-0324:free"
+      - "recursive/flint-v1.0:free"
+      - "cohere/north-mini-code:free"
+      - "nvidia/nemotron-3-ultra-550b-a55b:free"
+      - "nvidia/nemotron-3.5-lightning:free"
+      - "nvidia/nemotron-3.5-super-vl:free"
+      - "baidu/ernie-5.5-flash-preview:free"
+      - "dots-studio/dots-3-note-preview:free"
+      - "openrouter/free"
+    # Gone or no longer free as of 2026-11-17:
+    #   - "thinkingmachines/inkling:free"        (404, paid only now)
+    #   - "thinkingmachines/inkling-small:free"  (404, paid only now)
+    #   - "xingchen-agi/xing4.0-29b-a4b:free"    (404, no provider)
+    #   - "google/gemma-4-31b-it:free"           (429, upstream rate-limit)
+    #   - "google/gemma-4-26b-a4b-it:free"       (429, upstream rate-limit)
+    limits:
+      "recursive/flint-v1.0:free":
+        rpm: 20
+        rpd: 50
+        tpm: 0
+        tpd: 0
+      "cohere/north-mini-code:free":
+        rpm: 20
+        rpd: 50
+        tpm: 0
+        tpd: 0
+      "nvidia/nemotron-3-ultra-550b-a55b:free":
+        rpm: 20
+        rpd: 50
+        tpm: 0
+        tpd: 0
+      "nvidia/nemotron-3.5-lightning:free":
+        rpm: 20
+        rpd: 50
+        tpm: 0
+        tpd: 0
+      "nvidia/nemotron-3.5-super-vl:free":
+        rpm: 20
+        rpd: 50
+        tpm: 0
+        tpd: 0
+      "baidu/ernie-5.5-flash-preview:free":
+        rpm: 20
+        rpd: 50
+        tpm: 0
+        tpd: 0
+      "dots-studio/dots-3-note-preview:free":
+        rpm: 20
+        rpd: 50
+        tpm: 0
+        tpd: 0
+      "openrouter/free":
+        rpm: 20
+        rpd: 50
+        tpm: 0
+        tpd: 0
 
+  # ─── Mistral (Experiment plan) ───────────────────────────────────────
+  # No credit card, but PHONE VERIFICATION is required and the free plan
+  # lets Mistral train on your requests. ~1 RPS, ~500K TPM per model.
+  # Key: https://console.mistral.ai/
+  # Doctor 2026-11-17: skipped, MISTRAL_API_KEY not set.
+  # If "-latest" aliases fail, list real IDs with:
+  #   curl -H "Authorization: Bearer $MISTRAL_API_KEY" https://api.mistral.ai/v1/models
+  # Note: some sources report devstral-latest dropped from /models on
+  # 2026-09-04. It is left commented; use codestral-latest instead.
+  mistral:
+    type: "openai_compatible"
+    base_url: "https://api.mistral.ai/v1"
+    api_keys:
+      - "env.MISTRAL_API_KEY"
+    key_strategy: "sequential"
+    models:
+      - "codestral-latest"        # code generation + FIM
+      - "mistral-large-latest"    # Mistral Large 3
+      - "mistral-medium-latest"
+      - "mistral-small-latest"    # fast, good for fast-chat
+      # - "devstral-latest"       # may 404; uncomment if /models lists it
+    limits:
+      "codestral-latest":
+        rpm: 60
+        rpd: 0
+        tpm: 500000
+        tpd: 0
+      "mistral-large-latest":
+        rpm: 60
+        rpd: 0
+        tpm: 500000
+        tpd: 0
+      "mistral-medium-latest":
+        rpm: 60
+        rpd: 0
+        tpm: 500000
+        tpd: 0
+      "mistral-small-latest":
+        rpm: 60
+        rpd: 0
+        tpm: 500000
+        tpd: 0
+
+  # ─── Kilo Gateway ────────────────────────────────────────────────────
+  # No card, no phone. OpenAI-compatible, ~200 req/hour per IP.
+  # One key gives access to 335+ models, 6 of them free, plus 3 auto-routers.
+  # `kilo-auto/free` picks the best free model for the request at that moment.
+  # Key: https://kilo.ai/gateway
+  # Doctor: not run yet (key not set). It should pass without changes.
+  kilo:
+    type: "openai_compatible"
+    base_url: "https://api.kilo.ai/api/gateway"
+    api_keys:
+      - "env.KILO_API_KEY"
+    key_strategy: "balanced"
+    models:
+      - "kilo-auto/free"                             # auto-router over free models
+      # Direct free endpoints (if the auto-router ever misbehaves):
+      # - "nvidia/nemotron-3-ultra-550b-a55b:free"
+      # - "nvidia/nemotron-3.5-lightning:free"
+      # - "stepfun/step-3.7-flash:free"
+      # - "inclusionai/ling-3.1-flash"
+    limits:
+      "kilo-auto/free":
+        rpm: 0        # 200 req/hour, not RPM; keep 0 to disable per-minute cap
+        rpd: 0        # disabled; the hourly limit is enforced by Kilo itself
+        tpm: 0
+        tpd: 0
+
+  # ─── SambaNova Cloud ─────────────────────────────────────────────────
+  # No card. Free tier: 20 RPM · 20 RPD · 200K TPD per model.
+  # 20 requests/day is low, so use it as a last resort in smart/code groups.
+  # Key: https://cloud.sambanova.ai/
+  sambanova:
+    type: "openai_compatible"
+    base_url: "https://api.sambanova.ai/v1"
+    api_keys:
+      - "env.SAMBANOVA_API_KEY"
+    key_strategy: "sequential"
+    models:
+      - "Meta-Llama-3.3-70B-Instruct"
+      - "gpt-oss-120b"
+      - "DeepSeek-V3.2"
+    limits:
+      "Meta-Llama-3.3-70B-Instruct":
+        rpm: 20
+        rpd: 20
+        tpm: 0
+        tpd: 200000
+      "gpt-oss-120b":
+        rpm: 20
+        rpd: 20
+        tpm: 0
+        tpd: 200000
+      "DeepSeek-V3.2":
+        rpm: 20
+        rpd: 20
+        tpm: 0
+        tpd: 200000
+
+  # ─── Cohere (Trial key) ──────────────────────────────────────────────
+  # No card. 1,000 API calls/month, 20 RPM. Non-commercial use only.
+  # Key: https://dashboard.cohere.com/api-keys
+  cohere:
+    type: "openai_compatible"
+    base_url: "https://api.cohere.com/compatibility/v1"
+    api_keys:
+      - "env.COHERE_API_KEY"
+    key_strategy: "sequential"
+    models:
+      - "command-a-plus-05-2026"   # 128K input, 64K output
+    limits:
+      "command-a-plus-05-2026":
+        rpm: 20
+        rpd: 33       # ~1000 / 30 days
+        tpm: 0
+        tpd: 0
+
+  # ─── Cerebras (disabled) ─────────────────────────────────────────────
+  # As of late 2026, the $5 trial needs a verified payment method.
+  # cerebras:
+  #   type: "openai_compatible"
+  #   base_url: "https://api.cerebras.ai/v1"
+  #   api_keys:
+  #     - "env.CEREBRAS_API_KEY"
+  #   key_strategy: "sequential"
+  #   models:
+  #     - "llama3.1-8b"
+
+  # ─── Web provider (not implemented yet) ─────────────────────────────
   web_chatgpt:
     type: "web_puppeteer"
     enabled: false
@@ -45,30 +334,99 @@ providers:
     models:
       - "chatgpt-web"
 
+# ─── Routing ───────────────────────────────────────────────────────────
 routing:
   strategy: "priority"
   model_groups:
     "fast-chat":
       - provider: "groq"
-        model: "openai/gpt-oss-20b"
+        model: "openai/gpt-oss-20b"                     # 210ms
         priority: 1
-      - provider: "cerebras"
-        model: "llama3.1-8b"
+      - provider: "groq"
+        model: "qwen/qwen3.8-27b"                       # 279ms
         priority: 2
+      - provider: "mistral"
+        model: "mistral-small-latest"                   # ~1 RPS, fast
+        priority: 3
+      - provider: "gemini"
+        model: "gemini-3.5-flash-lite"                  # 3.3s
+        priority: 4
+      - provider: "nvidia"
+        model: "nvidia/nemotron-3.5-lightning-30b-a3b"  # 2.1s
+        priority: 5
+      - provider: "kilo"
+        model: "kilo-auto/free"                         # auto-router
+        priority: 6
+      - provider: "openrouter"
+        model: "nvidia/nemotron-3.5-lightning:free"     # 1.4s
+        priority: 7
+      - provider: "gemini"
+        model: "gemini-3.1-flash-lite"                  # 13.7s, last resort
+        priority: 8
 
     "smart-chat":
       - provider: "groq"
-        model: "openai/gpt-oss-120b"
+        model: "openai/gpt-oss-120b"                    # 1.2s
         priority: 1
-      - provider: "gemini"
-        model: "gemini-2.5-flash-lite"
+      - provider: "mistral"
+        model: "mistral-large-latest"                   # Mistral Large 3
         priority: 2
-      - provider: "openrouter"
-        model: "meta-llama/llama-3.3-70b-instruct:free"
+      - provider: "nvidia"
+        model: "nvidia/nemotron-3-ultra-550b-a55b"      # 2.1s, 1M ctx
         priority: 3
+      - provider: "nvidia"
+        model: "nvidia/nemotron-3.5-super-vl-120b-a12b" # 3.9s
+        priority: 4
+      - provider: "gemini"
+        model: "gemini-3.5-flash-lite"                  # 3.3s
+        priority: 5
+      - provider: "cohere"
+        model: "command-a-plus-05-2026"                 # 20 RPM, reasoning
+        priority: 6
+      - provider: "sambanova"
+        model: "Meta-Llama-3.3-70B-Instruct"            # 20 RPD, last resort
+        priority: 7
+      - provider: "openrouter"
+        model: "nvidia/nemotron-3-ultra-550b-a55b:free" # 1M ctx
+        priority: 8
+      - provider: "openrouter"
+        model: "baidu/ernie-5.5-flash-preview:free"     # 1M ctx
+        priority: 9
       - provider: "web_chatgpt"
         model: "chatgpt-web"
+        priority: 10
+
+    "code-chat":
+      - provider: "mistral"
+        model: "codestral-latest"                       # code + FIM specialist
+        priority: 1
+      - provider: "kilo"
+        model: "kilo-auto/free"                         # auto-routes to best free coder
+        priority: 2
+      - provider: "nvidia"
+        model: "nvidia/nemotron-3-ultra-550b-a55b"
+        priority: 3
+      - provider: "groq"
+        model: "openai/gpt-oss-120b"
         priority: 4
+      - provider: "nvidia"
+        model: "nvidia/nemotron-3.5-super-vl-120b-a12b"
+        priority: 5
+      - provider: "openrouter"
+        model: "cohere/north-mini-code:free"
+        priority: 6
+      - provider: "openrouter"
+        model: "recursive/flint-v1.0:free"
+        priority: 7
+      - provider: "sambanova"
+        model: "gpt-oss-120b"                           # 20 RPD, last resort
+        priority: 8
+      - provider: "groq"
+        model: "qwen/qwen3.8-27b"
+        priority: 9
+      - provider: "gemini"
+        model: "gemini-3.5-flash-lite"
+        priority: 10
 
 settings:
   retries_per_provider: 1

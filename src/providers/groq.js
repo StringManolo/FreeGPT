@@ -5,28 +5,21 @@ const { ProviderAdapter } = require("./base");
 class GroqAdapter extends ProviderAdapter {
   constructor(name, config) {
     super(name, config);
-    if (!config.api_key) {
-      throw new Error(`Groq provider "${name}" needs an api_key.`);
-    }
     this.baseUrl = (config.base_url || "https://api.groq.com/openai/v1").replace(/\/+$/, "");
   }
 
-  async chatCompletion({ model, messages, options = {} }) {
+  async chatCompletion({ model, messages, options = {}, apiKey }) {
+    const key = apiKey || this.getDefaultKey();
+    if (!key) throw new Error(`No API key available for "${this.name}".`);
+
     const url = `${this.baseUrl}/chat/completions`;
-
-    const body = {
-      model,
-      messages,
-      ...options
-    };
-
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.config.api_key}`
+        Authorization: `Bearer ${key}`
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ model, messages, ...options })
     });
 
     if (!response.ok) {
@@ -39,15 +32,22 @@ class GroqAdapter extends ProviderAdapter {
     }
 
     const data = await response.json();
-
-    // Groq already returns an OpenAI-compatible shape.
+    if (Array.isArray(data.choices)) {
+      for (const choice of data.choices) {
+        if (choice.message && "reasoning" in choice.message) {
+          delete choice.message.reasoning;
+        }
+      }
+    }
     return data;
   }
 
   async healthCheck() {
+    const key = this.getDefaultKey();
+    if (!key) return false;
     try {
       const response = await fetch(`${this.baseUrl}/models`, {
-        headers: { Authorization: `Bearer ${this.config.api_key}` }
+        headers: { Authorization: `Bearer ${key}` }
       });
       return response.ok;
     } catch (_) {

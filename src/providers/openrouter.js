@@ -5,20 +5,19 @@ const { ProviderAdapter } = require("./base");
 class OpenRouterAdapter extends ProviderAdapter {
   constructor(name, config) {
     super(name, config);
-    if (!config.api_key) {
-      throw new Error(`OpenRouter provider "${name}" needs an api_key.`);
-    }
     this.baseUrl = (config.base_url || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
   }
 
-  async chatCompletion({ model, messages, options = {} }) {
-    const url = `${this.baseUrl}/chat/completions`;
+  async chatCompletion({ model, messages, options = {}, apiKey }) {
+    const key = apiKey || this.getDefaultKey();
+    if (!key) throw new Error(`No API key available for "${this.name}".`);
 
+    const url = `${this.baseUrl}/chat/completions`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.config.api_key}`,
+        Authorization: `Bearer ${key}`,
         "HTTP-Referer": "https://github.com/stringmanolo/freegpt",
         "X-Title": "FreeGPT"
       },
@@ -38,9 +37,11 @@ class OpenRouterAdapter extends ProviderAdapter {
   }
 
   async healthCheck() {
+    const key = this.getDefaultKey();
+    if (!key) return false;
     try {
       const response = await fetch(`${this.baseUrl}/models`, {
-        headers: { Authorization: `Bearer ${this.config.api_key}` }
+        headers: { Authorization: `Bearer ${key}` }
       });
       return response.ok;
     } catch (_) {
