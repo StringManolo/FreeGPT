@@ -1,0 +1,21 @@
+{
+  "name": "freegpt",
+  "version": "0.1.0",
+  "description": "Free AI provider gateway with an OpenAI-compatible API",
+  "main": "src/server.js",
+  "bin": {
+    "freegpt": "src/cli.js"
+  },
+  "files": [
+    "src/",
+    "config.demo.yaml",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node src/cli.js serve"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "simpleargumentsparser": "^1.0.0"
+  }
+}

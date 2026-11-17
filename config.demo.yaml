@@ -1,0 +1,77 @@
+# FreeGPT demo configuration.
+# Copy this file to ~/.freegpt/config.yaml and fill in your credentials.
+# The FreeGPT CLI copies it automatically if ~/.freegpt/config.yaml does not exist.
+# The CLI must never overwrite an existing config.yaml.
+
+providers:
+  groq:
+    type: "openai_compatible"
+    base_url: "https://api.groq.com/openai/v1"
+    api_key: "env.GROQ_API_KEY"
+    models:
+      - "openai/gpt-oss-20b"
+      - "openai/gpt-oss-120b"
+
+  cerebras:
+    type: "openai_compatible"
+    base_url: "https://api.cerebras.ai/v1"
+    api_key: "YOUR_CEREBRAS_API_KEY_HERE"
+    models:
+      - "llama3.1-8b"
+      - "llama3.1-70b"
+
+  gemini:
+    type: "gemini_native"
+    api_key: "YOUR_GOOGLE_AI_STUDIO_API_KEY_HERE"
+    models:
+      - "gemini-2.5-flash-lite"
+
+  openrouter:
+    type: "openai_compatible"
+    base_url: "https://openrouter.ai/api/v1"
+    api_key: "env.OPENROUTER_API_KEY"
+    models:
+      - "meta-llama/llama-3.3-70b-instruct:free"
+      - "deepseek/deepseek-chat-v3-0324:free"
+
+  web_chatgpt:
+    type: "web_puppeteer"
+    enabled: false
+    user_data_dir: "~/.freegpt/chrome-profiles/chatgpt"
+    cookie_file: "~/.freegpt/cookies/chatgpt.json"
+    input_selector: "textarea[placeholder='Send a message']"
+    submit_selector: "button[data-testid='send-button']"
+    response_selector: "[data-message-author-role='assistant']"
+    models:
+      - "chatgpt-web"
+
+routing:
+  strategy: "priority"
+  model_groups:
+    "fast-chat":
+      - provider: "groq"
+        model: "openai/gpt-oss-20b"
+        priority: 1
+      - provider: "cerebras"
+        model: "llama3.1-8b"
+        priority: 2
+
+    "smart-chat":
+      - provider: "groq"
+        model: "openai/gpt-oss-120b"
+        priority: 1
+      - provider: "gemini"
+        model: "gemini-2.5-flash-lite"
+        priority: 2
+      - provider: "openrouter"
+        model: "meta-llama/llama-3.3-70b-instruct:free"
+        priority: 3
+      - provider: "web_chatgpt"
+        model: "chatgpt-web"
+        priority: 4
+
+settings:
+  retries_per_provider: 1
+  request_timeout_ms: 30000
+  cooldown_after_failure_ms: 60000
+  port: 3100
