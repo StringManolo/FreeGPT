@@ -2,6 +2,15 @@
 
 const { CooldownTracker } = require("./cooldown");
 
+function cleanProviderError(msg) {
+  if (!msg) return msg;
+  return msg
+    .replace(/\s*Need more tokens\??\s*Upgrade to Dev Tier today at \S+/gi, "")
+    .replace(/\s*Upgrade to Dev Tier today at \S+/gi, "")
+    .replace(/\s*For more on scraping[^.]*\./gi, "")
+    .trim();
+}
+
 function isContextError(record) {
   if (!record || record.status !== "failed") return false;
   if (record.errorStatus === 413) return true;
@@ -16,6 +25,13 @@ function isContextError(record) {
     msg.includes("exceeds the maximum") ||
     msg.includes("too long")
   );
+}
+
+function parseRetryAfterMs(msg) {
+  if (!msg) return 0;
+  const m = msg.match(/try again in ([\d.]+)\s*s/i);
+  if (m) return Math.ceil(parseFloat(m[1]) * 1000);
+  return 0;
 }
 
 class Router {
@@ -50,12 +66,24 @@ class Router {
   }
 
   async chatCompletion({ model: logicalModel, messages, options = {} }) {
-    const chain = this.resolveChain(logicalModel);
+    const fullChain = this.resolveChain(logicalModel);
+
+    if (fullChain.length === 0) {
+      const err = new Error(`No providers configured for model "${logicalModel}".`);
+      err.code = "NO_CHAIN";
+      throw err;
+    }
+
+    const chain = fullChain.filter((step) => this.providers.has(step.provider));
+
     if (chain.length === 0) {
-      throw new Error(
-        `No provider configured for model "${logicalModel}". ` +
-          `Check routing.model_groups in ~/.freegpt/config.yaml.`
+      const skipped = fullChain.map((s) => s.provider);
+      const err = new Error(
+        `All providers for "${logicalModel}" were skipped at startup (${skipped.join(", ")}).`
       );
+      err.code = "NO_PROVIDERS";
+      err.skipped = skipped;
+      throw err;
     }
 
     const startTime = Date.now();
@@ -64,10 +92,8 @@ class Router {
 
     for (const step of chain) {
       const adapter = this.providers.get(step.provider);
-      if (!adapter) {
-        errors.push(`${step.provider}: provider not loaded`);
-        continue;
-      }
+      if (!adapter) continue;
+
       if (this.cooldown.isCoolingDown(step.provider)) {
         const ms = this.cooldown.remainingMs(step.provider);
         errors.push(`${step.provider}: cooling down for ${ms} ms`);
@@ -105,7 +131,7 @@ class Router {
           };
         } catch (err) {
           record.status = "failed";
-          record.error = err.message;
+          record.error = cleanProviderError(err.message);
           record.errorStatus = err.status || 0;
           record.durationMs = Date.now() - attemptStart;
 
@@ -115,14 +141,19 @@ class Router {
           const isTimeout = err.code === "ETIMEDOUT";
 
           errors.push(
-            `${step.provider}/${step.model} attempt ${attempt + 1}: ${err.message}`
+            `${step.provider}/${step.model} attempt ${attempt + 1}: ${record.error}`
           );
 
           if (isFatal) {
             this.cooldown.recordFailure(step.provider, 5 * 60_000);
             break;
           }
-          if (isRateLimit || isTimeout) {
+          if (isRateLimit) {
+            const retryMs = parseRetryAfterMs(err.message);
+            this.cooldown.recordFailure(step.provider, retryMs || 60_000);
+            break;
+          }
+          if (isTimeout) {
             this.cooldown.recordFailure(step.provider, 60_000);
             break;
           }
@@ -130,10 +161,9 @@ class Router {
       }
     }
 
-    // Todos los intentos fallaron por tamaño → error específico
     if (attempts.length > 0 && attempts.every(isContextError)) {
       const err = new Error(
-        "The conversation exceeds the context or token limits of all configured providers."
+        "The conversation exceeds the token limit of every configured provider."
       );
       err.code = "CONTEXT_EXCEEDED";
       err.attempts = attempts.map((a) => ({
@@ -146,8 +176,30 @@ class Router {
       throw err;
     }
 
-    const summary = errors.map((e) => `  - ${e}`).join("\n");
-    throw new Error(`All providers failed for "${logicalModel}":\n${summary}`);
+    const anyRateLimit = attempts.some((a) => a.errorStatus === 429);
+    const anyAuth = attempts.some(
+      (a) => a.errorStatus === 401 || a.errorStatus === 403
+    );
+    const allRateLimit =
+      attempts.length > 0 && attempts.every((a) => a.errorStatus === 429);
+
+    let code = "ALL_FAILED";
+    if (allRateLimit) code = "ALL_RATE_LIMITED";
+    else if (anyRateLimit && !anyAuth) code = "SOME_RATE_LIMITED";
+    else if (anyAuth) code = "AUTH_FAILED";
+
+    const err = new Error(`All providers failed for "${logicalModel}".`);
+    err.code = code;
+    err.attempts = attempts.map((a) => ({
+      provider: a.provider,
+      model: a.model,
+      attempt: a.attempt,
+      error: a.error,
+      errorStatus: a.errorStatus,
+      durationMs: a.durationMs
+    }));
+    err.summary = errors.join("\n");
+    throw err;
   }
 
   withTimeout(promise, ms) {
@@ -171,4 +223,4 @@ class Router {
   }
 }
 
-module.exports = { Router };
+module.exports = { Router, cleanProviderError };

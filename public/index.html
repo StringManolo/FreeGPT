@@ -117,6 +117,7 @@
       </label>
       <label class="row"><input id="setting-show-process" type="checkbox" /> Show process timeline</label>
       <label class="row"><input id="setting-show-model" type="checkbox" /> Show model badge</label>
+      <label class="row"><input id="setting-show-raw-errors" type="checkbox" /> Show raw error details</label>
       <div class="dialog-actions">
         <button value="cancel" class="btn ghost">Cancel</button>
         <button value="save" class="btn primary" id="save-settings">Save</button>
@@ -146,7 +147,7 @@
     </div>
   </dialog>
 
-    <dialog id="context-dialog" class="wide-dialog">
+  <dialog id="context-dialog" class="wide-dialog">
     <h2>Context too large</h2>
     <p class="context-explainer">
       No configured provider can process the full conversation.
