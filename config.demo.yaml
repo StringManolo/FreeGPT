@@ -347,19 +347,19 @@ routing:
         priority: 2
       - provider: "mistral"
         model: "mistral-small-latest"                   # ~1 RPS, fast
-        priority: 3
+        priority: 4
       - provider: "gemini"
         model: "gemini-3.5-flash-lite"                  # 3.3s
-        priority: 4
+        priority: 7
       - provider: "nvidia"
         model: "nvidia/nemotron-3.5-lightning-30b-a3b"  # 2.1s
         priority: 5
       - provider: "kilo"
         model: "kilo-auto/free"                         # auto-router
-        priority: 6
+        priority: 7
       - provider: "openrouter"
         model: "nvidia/nemotron-3.5-lightning:free"     # 1.4s
-        priority: 7
+        priority: 3
       - provider: "gemini"
         model: "gemini-3.1-flash-lite"                  # 13.7s, last resort
         priority: 8
@@ -367,10 +367,10 @@ routing:
     "smart-chat":
       - provider: "groq"
         model: "openai/gpt-oss-120b"                    # 1.2s
-        priority: 1
+        priority: 6
       - provider: "mistral"
         model: "mistral-large-latest"                   # Mistral Large 3
-        priority: 2
+        priority: 5
       - provider: "nvidia"
         model: "nvidia/nemotron-3-ultra-550b-a55b"      # 2.1s, 1M ctx
         priority: 3
@@ -379,19 +379,19 @@ routing:
         priority: 4
       - provider: "gemini"
         model: "gemini-3.5-flash-lite"                  # 3.3s
-        priority: 5
+        priority: 7
       - provider: "cohere"
         model: "command-a-plus-05-2026"                 # 20 RPM, reasoning
-        priority: 6
+        priority: 8
       - provider: "sambanova"
         model: "Meta-Llama-3.3-70B-Instruct"            # 20 RPD, last resort
-        priority: 7
+        priority: 9
       - provider: "openrouter"
         model: "nvidia/nemotron-3-ultra-550b-a55b:free" # 1M ctx
-        priority: 8
+        priority: 1
       - provider: "openrouter"
         model: "baidu/ernie-5.5-flash-preview:free"     # 1M ctx
-        priority: 9
+        priority: 2
       - provider: "web_chatgpt"
         model: "chatgpt-web"
         priority: 10
@@ -401,32 +401,32 @@ routing:
         model: "codestral-latest"                       # code + FIM specialist
         priority: 1
       - provider: "kilo"
-        model: "kilo-auto/free"                         # auto-routes to best free coder
+        model: "kilo-auto/free"                         # auto-routes to best coder
         priority: 2
       - provider: "nvidia"
         model: "nvidia/nemotron-3-ultra-550b-a55b"
         priority: 3
       - provider: "groq"
         model: "openai/gpt-oss-120b"
-        priority: 4
+        priority: 5
       - provider: "nvidia"
         model: "nvidia/nemotron-3.5-super-vl-120b-a12b"
-        priority: 5
-      - provider: "openrouter"
-        model: "cohere/north-mini-code:free"
         priority: 6
       - provider: "openrouter"
-        model: "recursive/flint-v1.0:free"
+        model: "cohere/north-mini-code:free"
         priority: 7
+      - provider: "openrouter"
+        model: "recursive/flint-v1.0:free"
+        priority: 8
       - provider: "sambanova"
         model: "gpt-oss-120b"                           # 20 RPD, last resort
-        priority: 8
+        priority: 9
       - provider: "groq"
         model: "qwen/qwen3.8-27b"
-        priority: 9
+        priority: 10
       - provider: "gemini"
         model: "gemini-3.5-flash-lite"
-        priority: 10
+        priority: 4
 
 settings:
   retries_per_provider: 1
