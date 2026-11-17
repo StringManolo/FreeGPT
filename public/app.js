@@ -567,6 +567,8 @@ function agentEndpoint() {
   }
 }
 
+const DANGEROUS_TOOLS = new Set(["terminal", "git"]);
+
 function humanizeTool(name) {
   return String(name).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -624,14 +626,22 @@ function renderModeBar() {
   }
 
   panel.innerHTML = "";
-  for (const tool of tools) {
+  const sorted = [...tools].sort((a, b) => {
+    const da = DANGEROUS_TOOLS.has(a.name) ? 1 : 0;
+    const db = DANGEROUS_TOOLS.has(b.name) ? 1 : 0;
+    if (da !== db) return da - db;
+    return a.name.localeCompare(b.name);
+  });
+  for (const tool of sorted) {
+    const isDangerous = DANGEROUS_TOOLS.has(tool.name);
     const label = document.createElement("label");
-    label.className = "tool-toggle";
+    label.className = "tool-toggle" + (isDangerous ? " tool-danger" : "");
     label.title = tool.description || "";
     const checked = !!(conv.tools && conv.tools[tool.name]);
     label.innerHTML = `
       <input type="checkbox" data-tool="${escapeHtml(tool.name)}" ${checked ? "checked" : ""}>
       <span>${escapeHtml(humanizeTool(tool.name))}</span>
+      ${isDangerous ? `<span class="tool-warn" title="may run commands or read local files" aria-label="may run commands or read local files">${ICONS.warning}</span>` : ""}
     `;
     label.querySelector("input").addEventListener("change", (e) => {
       setToolEnabled(tool.name, e.target.checked);
@@ -1121,6 +1131,8 @@ async function compactBySummary(srcConv) {
     id: uid(),
     title: `${srcConv.title} (continued)`,
     model: srcConv.model,
+    mode: srcConv.mode || "chat",
+    tools: { ...(srcConv.tools || {}) },
     messages: [{ id: uid(), role: "user", content: newContent, attachments: [] }],
     pendingAttachments: []
   };
@@ -1149,6 +1161,8 @@ function compactByTruncate(srcConv, maxTokens) {
     id: uid(),
     title: `${srcConv.title} (continued)`,
     model: srcConv.model,
+    mode: srcConv.mode || "chat",
+    tools: { ...(srcConv.tools || {}) },
     messages: keep.map((m) => ({
       ...m, id: uid(),
       attachments: m.attachments ? [...m.attachments] : []

@@ -447,16 +447,15 @@ agent:
       # Solo lectura (read/list/stat/glob). Writes no soportados aún.
       # Las rutas en allow_paths se resuelven con realpath: symlinks y `../`
       # se bloquean si salen del árbol permitido.
-      enabled: false
-      allow_paths: []
-        # - "/root/2027/FreeGPT"
+      enabled: true
+      allow_paths: ["/root/2027/FreeGPT/agent_folder"]
     terminal:
       # Comandos de solo lectura con allow-list explícita. Sin shell, sin pipes.
       # NO es un sandbox real: para aislamiento fuerte usa `runner` con bwrap/firejail.
       #   Instalar bwrap:  apt install bubblewrap
       #   Ejemplo runner:  ["bwrap", "--unshare-all", "--die-with-parent", "--ro-bind", "/", "/", "--"]
-      enabled: false
-      allow_paths: []
+      enabled: true
+      allow_paths: ["/root/2027/FreeGPT/agent_folder"]
         # - "/root/2027/FreeGPT"
       allow_commands:
         - "ls"
@@ -472,14 +471,14 @@ agent:
         - "which"
         - "node"
         - "python3"
-      timeout_ms: 10000
+      timeout_ms: 60000
       max_output_bytes: 65536
       runner: []
     git:
       # Solo lectura (status/log/diff/show/branch/ls-files/remote/rev-parse).
       # Sin red, sin escritura, sin args libres: cada operación mapea a un argv fijo.
-      enabled: false
-      allow_paths: []
+      enabled: true
+      allow_paths: ["/root/2027/FreeGPT/agent_folder"]
         # - "/root/2027/FreeGPT"
       timeout_ms: 10000
 

@@ -25,3 +25,4 @@
 - Add multimodal (can use free models with puppeter) (can use small local models too)
 - Add (or test) 2 modes for Puppeteer (As service always running, or per demand) 
 - Add real streaming (with pause, continue, stop etc)
+- Use secure folder for agent (probably a proot is needed or something similar)

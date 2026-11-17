@@ -97,7 +97,7 @@ class Router {
     return chain;
   }
 
-  async chatCompletion({ model: logicalModel, messages, options = {} }) {
+  async chatCompletion({ model: logicalModel, messages, options = {}, signal }) {
     const fullChain = this.resolveChain(logicalModel);
     if (fullChain.length === 0) {
       const err = new Error(`No providers configured for model "${logicalModel}".`);
@@ -158,9 +158,11 @@ class Router {
               model: step.model,
               messages,
               options,
-              apiKey: entry.secret
+              apiKey: entry.secret,
+              signal
             }),
-            this.timeoutMs
+            this.timeoutMs,
+            signal
           );
 
           const tokensUsed =
@@ -185,6 +187,9 @@ class Router {
             }
           };
         } catch (err) {
+          if (err && err.code === "CANCELLED") {
+            throw err;
+          }
           record.status = "failed";
           record.error = cleanProviderError(err.message);
           record.errorStatus = err.status || 0;
@@ -248,16 +253,37 @@ class Router {
     throw err;
   }
 
-  withTimeout(promise, ms) {
+  withTimeout(promise, ms, externalSignal) {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let timer = null;
+      let onAbort = null;
+      const cleanup = () => {
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (onAbort && externalSignal) externalSignal.removeEventListener("abort", onAbort);
+      };
+      if (externalSignal && externalSignal.aborted) {
+        const e = new Error("Request cancelled by client.");
+        e.code = "CANCELLED";
+        return reject(e);
+      }
+      timer = setTimeout(() => {
+        cleanup();
         const e = new Error(`Request timed out after ${ms} ms`);
         e.code = "ETIMEDOUT";
         reject(e);
       }, ms);
+      if (externalSignal) {
+        onAbort = () => {
+          cleanup();
+          const e = new Error("Request cancelled by client.");
+          e.code = "CANCELLED";
+          reject(e);
+        };
+        externalSignal.addEventListener("abort", onAbort, { once: true });
+      }
       promise.then(
-        (v) => { clearTimeout(timer); resolve(v); },
-        (e) => { clearTimeout(timer); reject(e); }
+        (v) => { cleanup(); resolve(v); },
+        (e) => { cleanup(); reject(e); }
       );
     });
   }

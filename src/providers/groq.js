@@ -8,7 +8,7 @@ class GroqAdapter extends ProviderAdapter {
     this.baseUrl = (config.base_url || "https://api.groq.com/openai/v1").replace(/\/+$/, "");
   }
 
-  async chatCompletion({ model, messages, options = {}, apiKey }) {
+  async chatCompletion({ model, messages, options = {}, apiKey, signal }) {
     const key = apiKey || this.getDefaultKey();
     if (!key) throw new Error(`No API key available for "${this.name}".`);
 
@@ -19,7 +19,8 @@ class GroqAdapter extends ProviderAdapter {
         "Content-Type": "application/json",
         Authorization: `Bearer ${key}`
       },
-      body: JSON.stringify({ model, messages, ...options })
+      body: JSON.stringify({ model, messages, ...options }),
+      signal
     });
 
     if (!response.ok) {

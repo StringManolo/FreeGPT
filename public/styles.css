@@ -873,6 +873,39 @@ dialog input[type="checkbox"], dialog input[type="radio"] { margin: 0; }
   color: var(--text);
 }
 
+/* Dangerous tools (terminal, git): warning icon + amber accent */
+.tool-toggle.tool-danger {
+  border-color: rgba(255, 176, 32, 0.35);
+}
+.tool-toggle.tool-danger:hover {
+  border-color: rgba(255, 176, 32, 0.6);
+}
+.tool-toggle.tool-danger:has(input:checked) {
+  background: rgba(255, 176, 32, 0.12);
+  border-color: var(--warn);
+  color: var(--text);
+}
+.tool-toggle.tool-danger input:checked + span {
+  color: var(--warn);
+}
+.tool-toggle .tool-warn {
+  display: inline-flex;
+  color: var(--warn);
+  margin-left: 2px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+.tool-toggle .tool-warn svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  display: block;
+}
+[data-theme="light"] .tool-toggle.tool-danger:has(input:checked) {
+  background: rgba(255, 176, 32, 0.18);
+}
+
 .tools-empty {
   font-size: 12px;
   color: var(--muted);
