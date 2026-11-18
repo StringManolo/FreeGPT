@@ -376,11 +376,6 @@ function renderMessage(msg) {
   if (msg.role === "assistant") {
     bubble.innerHTML = marked.parse(msg.content || "");
     enhanceCodeBlocks(bubble);
-    bubble.querySelectorAll("pre code").forEach((block) => {
-      if (window.hljs) {
-        try { hljs.highlightElement(block); } catch {}
-      }
-    });
   } else {
     bubble.textContent = msg.content;
   }
@@ -738,18 +733,114 @@ async function loadAvailableTools() {
 }
 
 function enhanceCodeBlocks(container) {
+  if (!container) return;
+
+  const languageNames = {
+    js: "JavaScript",
+    javascript: "JavaScript",
+    ts: "TypeScript",
+    typescript: "TypeScript",
+    py: "Python",
+    python: "Python",
+    html: "HTML",
+    xml: "XML",
+    css: "CSS",
+    json: "JSON",
+    bash: "Bash",
+    sh: "Shell",
+    shell: "Shell",
+    plaintext: "Plain text",
+    text: "Plain text",
+    txt: "Plain text",
+    md: "Markdown",
+    markdown: "Markdown",
+    yml: "YAML",
+    yaml: "YAML",
+    rb: "Ruby",
+    rs: "Rust",
+    go: "Go",
+    java: "Java",
+    c: "C",
+    cpp: "C++",
+    cs: "C#",
+    php: "PHP",
+    sql: "SQL",
+    diff: "Diff",
+    dockerfile: "Dockerfile",
+    makefile: "Makefile"
+  };
+
   container.querySelectorAll("pre").forEach((pre) => {
-    if (pre.querySelector(".copy-code")) return;
+    if (pre.closest(".code-block")) return;
+
+    const code = pre.querySelector("code");
+    let language = "";
+    let explicitLanguage = "";
+
+    if (code) {
+      const languageClass = [...code.classList].find((name) =>
+        name.startsWith("language-")
+      );
+
+      if (languageClass) {
+        explicitLanguage = languageClass.slice("language-".length)
+          .trim().split(/\s+/)[0].toLowerCase();
+      }
+
+      if (window.hljs) {
+        try {
+          if (explicitLanguage && hljs.getLanguage(explicitLanguage)) {
+            language = explicitLanguage;
+            hljs.highlightElement(code);
+          } else if (!explicitLanguage) {
+            const result = hljs.highlightAuto(code.textContent);
+            if (result.language && result.language !== "plaintext") {
+              language = result.language;
+              code.innerHTML = result.value;
+              code.classList.add("hljs");
+              code.classList.add(`language-${result.language}`);
+            }
+          } else {
+            // Lenguaje explícito no incluido en el build de Highlight.js.
+            language = explicitLanguage;
+          }
+        } catch (err) {
+          console.warn("[freegpt] syntax highlighting failed:", err);
+        }
+      } else if (explicitLanguage) {
+        language = explicitLanguage;
+      }
+    }
+
+    const label = language
+      ? (languageNames[language] || language.toUpperCase())
+      : "Code";
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "code-block";
+
+    const header = document.createElement("div");
+    header.className = "code-header";
+
+    const languageLabel = document.createElement("span");
+    languageLabel.className = "code-language";
+    languageLabel.textContent = label;
+
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "copy-code";
     btn.textContent = "Copy";
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const code = pre.querySelector("code") || pre;
-      copyText(code.textContent, "Code copied");
+      copyText(code ? code.textContent : pre.textContent, "Code copied");
     });
-    pre.appendChild(btn);
+
+    header.appendChild(languageLabel);
+    header.appendChild(btn);
+
+    pre.parentNode.insertBefore(wrapper, pre);
+    wrapper.appendChild(header);
+    wrapper.appendChild(pre);
   });
 }
 

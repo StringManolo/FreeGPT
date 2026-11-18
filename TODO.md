@@ -1,13 +1,8 @@
 # TODO
 
-- Add own chat interface (client that consumes the API)
-- Also bash cli client using curl
 - Make models name dynamic
 - Install css and markdown libs locally
-- Handle conversations seamensly between different models. (share full history if needed)
-- Create resumes for new conversations
 - Allow client to chose the specific model from a list of options
-- Add code highlight (include language detection like Deepseek web does)
 - Add testing
 - Port to React if needed
 - Detect usage / max size per prompt per model
@@ -37,3 +32,4 @@
 - Add Warning/Danger red icon to shell
 - Test clone in clean Debian live CD
 - Translate to english postinstall script output
+- Add options to delete chats
