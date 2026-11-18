@@ -31,3 +31,4 @@
 - Update / make a good README with images
 - Update bash client with new features (like agent)
 - Terminal might be redundant with shell (shell runs only on sandbox do)
+- Clean the udocker storage to free space (outside of the project, just a reminder for the dev)

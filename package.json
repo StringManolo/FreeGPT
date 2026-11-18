@@ -10,6 +10,7 @@
   "files": ["src/", "bin/", "scripts/", "sandbox/", "config.demo.yaml", "README.md"],
   "scripts": {
   "start": "node src/cli.js serve",
+  "test": "node --test test/",
   "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {

@@ -454,7 +454,7 @@ agent:
       # Las rutas en allow_paths se resuelven con realpath: symlinks y `../`
       # se bloquean si salen del árbol permitido.
       enabled: true
-      allow_paths: ["/root/2027/FreeGPT/agent_folder"]
+      allow_paths: ["{repo}/agent_folder"]
     terminal:
       # Comandos de solo lectura con allow-list explícita. Sin shell, sin pipes.
       # Con agent.sandbox.enabled: true se ejecutan dentro del sandbox (udocker).
@@ -462,7 +462,7 @@ agent:
       # (ALLOWED); no puede añadir comandos nuevos.
       # Si defines `runner`, se usa ese prefijo en el host y el sandbox NO interviene.
       enabled: true
-      allow_paths: ["/root/2027/FreeGPT/agent_folder"]
+      allow_paths: ["{repo}/agent_folder"]
         # - "/root/2027/FreeGPT"
       allow_commands:
         - "ls"
@@ -483,7 +483,7 @@ agent:
       # Shell completo (sh -c) DENTRO del sandbox. Solo funciona con agent.sandbox.enabled: true.
       # allow_paths es lo único del host que el agente ve, y es ESCRIBIBLE.
       enabled: true
-      allow_paths: ["/root/2027/FreeGPT/agent_folder"]
+      allow_paths: ["{repo}/agent_folder"]
       timeout_ms: 30000
       max_output_bytes: 131072
     git:
@@ -492,7 +492,7 @@ agent:
       # Con agent.sandbox.enabled: true corre dentro del sandbox, que solo ve allow_paths:
       # el repo debe estar dentro de esas rutas (agent_folder necesita su propio `git init`).
       enabled: true
-      allow_paths: ["/root/2027/FreeGPT/agent_folder"]
+      allow_paths: ["{repo}/agent_folder"]
         # - "/root/2027/FreeGPT"
       timeout_ms: 10000
 
