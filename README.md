@@ -117,14 +117,6 @@ freegpt --ui --track-agent
 # In the web click Agent to activate the agent running in an Udocker sandbox. And click shell to activate his ability to run commands
 ```
 
-## Installation
-
-```bash
-npm install -g freegpt
-```
-
-For local development from a clone:
-
 ```bash
 git clone https://github.com/stringmanolo/freegpt.git
 cd freegpt
