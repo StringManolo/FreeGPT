@@ -162,3 +162,7 @@ vite.config.ts.timestamp-*
 # Python cache
 __pycache__/
 *.py[cod]
+
+# Agent working dir: keep only the placeholder
+agent_folder/*
+!agent_folder/this_folder_is_the_agent_working_dir.txt

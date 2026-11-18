@@ -30,3 +30,4 @@
 - Add a Free Agent mode. (no limits, just a sleep between calls to don't exhaust resources or providers)
 - Update / make a good README with images
 - Update bash client with new features (like agent)
+- Terminal might be redundant with shell (shell runs only on sandbox do)

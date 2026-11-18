@@ -430,14 +430,13 @@ routing:
 
 # ─── Agent (FGTP) ─────────────────────────────────────────────────────
 agent:
-  agent:
   sandbox:
-    # true (por defecto): terminal y git corren dentro de un Debian aislado (udocker).
+    # true (por defecto): terminal y git corren dentro de un Debian aislado
+    #   (udocker, modo F1). Se prepara solo con `npm install` y al arrancar.
     # false: corren directamente en tu sistema, SIN aislamiento.
     enabled: true
     name: freegpt-agent
     image: debian:bookworm-slim   # solo se usa si no hay rootfs incluido para tu arquitectura
-    packages: [git, file]         # se instalan dentro del sandbox la primera vez
   limits:
     max_iterations: 15
     max_calls: 20
@@ -458,9 +457,10 @@ agent:
       allow_paths: ["/root/2027/FreeGPT/agent_folder"]
     terminal:
       # Comandos de solo lectura con allow-list explícita. Sin shell, sin pipes.
-      # NO es un sandbox real: para aislamiento fuerte usa `runner` con bwrap/firejail.
-      #   Instalar bwrap:  apt install bubblewrap
-      #   Ejemplo runner:  ["bwrap", "--unshare-all", "--die-with-parent", "--ro-bind", "/", "/", "--"]
+      # Con agent.sandbox.enabled: true se ejecutan dentro del sandbox (udocker).
+      # allow_commands solo activa comandos que ya existen en src/tools/terminal.js
+      # (ALLOWED); no puede añadir comandos nuevos.
+      # Si defines `runner`, se usa ese prefijo en el host y el sandbox NO interviene.
       enabled: true
       allow_paths: ["/root/2027/FreeGPT/agent_folder"]
         # - "/root/2027/FreeGPT"
@@ -476,14 +476,21 @@ agent:
         - "file"
         - "stat"
         - "which"
-        - "node"
-        - "python3"
       timeout_ms: 60000
       max_output_bytes: 65536
       runner: []
+    shell:
+      # Shell completo (sh -c) DENTRO del sandbox. Solo funciona con agent.sandbox.enabled: true.
+      # allow_paths es lo único del host que el agente ve, y es ESCRIBIBLE.
+      enabled: true
+      allow_paths: ["/root/2027/FreeGPT/agent_folder"]
+      timeout_ms: 30000
+      max_output_bytes: 131072
     git:
       # Solo lectura (status/log/diff/show/branch/ls-files/remote/rev-parse).
       # Sin red, sin escritura, sin args libres: cada operación mapea a un argv fijo.
+      # Con agent.sandbox.enabled: true corre dentro del sandbox, que solo ve allow_paths:
+      # el repo debe estar dentro de esas rutas (agent_folder necesita su propio `git init`).
       enabled: true
       allow_paths: ["/root/2027/FreeGPT/agent_folder"]
         # - "/root/2027/FreeGPT"

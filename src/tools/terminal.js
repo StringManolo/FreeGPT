@@ -25,7 +25,8 @@ const ALLOWED = {
   node:    { argv: ['--version'],              maxArgs: 0, fixed: true },
   python3: { argv: ['--version'],              maxArgs: 0, fixed: true },
 };
-const PATH_TAKING = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'du', 'file', 'stat', 'which']);
+// `which` NO va aquí: recibe un nombre de comando, no una ruta.
+const PATH_TAKING = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'du', 'file', 'stat']);
 
 function isInside(parent, child) {
   const rel = path.relative(parent, child);
@@ -52,22 +53,24 @@ function buildConfig(agentConfig) {
   };
 }
 
+// Si `runner` está definido a mano, se usa tal cual (host + prefijo del usuario).
+// Si está vacío, el proceso va por el sandbox (o al host si agent.sandbox.enabled: false).
 function runWithRunner(argv, cwd, timeoutMs, maxBytes, runner, agentConfig, roots) {
   const finalArgv = runner.length ? [...runner, ...argv] : argv;
   const cmd = finalArgv[0];
   const args = finalArgv.slice(1);
-
-  const run = runner.length  
+  const run = runner.length
     ? execFile
     : (c, a, o, cb) => sandbox.execFileIn(agentConfig, roots, c, a, o, cb);
   return new Promise((resolve, reject) => {
-    run(cmd, args, {  
+    run(cmd, args, {
       cwd, timeout: timeoutMs, maxBuffer: maxBytes,
       env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: process.env.HOME, LANG: 'C', LC_ALL: 'C' },
     }, (err, stdout, stderr) => {
       if (err && err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
         return resolve({ stdout: String(stdout), stderr: String(stderr).slice(0, 4096), truncated: true });
       if (err && err.killed) return reject(Object.assign(new Error('command timeout'), { code: 'TIMEOUT' }));
+      if (err && err.code === 'SANDBOX_UNAVAILABLE') return reject(err);
       if (err) return reject(Object.assign(new Error(`command failed: ${stderr || err.message}`), { code: 'EXECUTION_FAILED' }));
       const out = String(stdout);
       resolve({ stdout: out.slice(0, maxBytes), stderr: String(stderr).slice(0, 4096), truncated: out.length > maxBytes });
@@ -79,8 +82,9 @@ registerTool({
   name: 'terminal',
   description:
     'Run a small allow-listed set of READ-ONLY commands (' + Object.keys(ALLOWED).join(', ') + '). ' +
-    'cwd and path args must be inside allow_paths. No shell, no pipes, no writes. NOT a true sandbox — ' +
-    'configure `runner` (e.g. bwrap) for real isolation.',
+    'cwd and path args must be inside allow_paths. No shell, no pipes, no writes. ' +
+    'Commands run inside an isolated sandbox when agent.sandbox.enabled is true; ' +
+    'which takes a command name (not a path).',
   parameters: {
     type: 'object',
     properties: {
@@ -104,6 +108,7 @@ registerTool({
     const cfg = buildConfig(ctx.agentConfig);
     if (!cfg) throw Object.assign(new Error('terminal not enabled or no allow_paths.'), { code: 'TOOL_DISABLED' });
     if (!cfg.runner.length) await sandbox.ensureReady(ctx.agentConfig);
+
     const cmd = args.command.trim();
     if (!cfg.allowCommands.includes(cmd))
       throw Object.assign(new Error(`command not in allow_commands: ${cmd}`), { code: 'PERMISSION_DENIED' });
@@ -115,6 +120,8 @@ registerTool({
       throw Object.assign(new Error(`too many args for ${cmd} (max ${spec.maxArgs})`), { code: 'INVALID_SCHEMA' });
     for (const a of userArgs) {
       if (a.includes('\0')) throw Object.assign(new Error('NUL byte in args'), { code: 'INVALID_SCHEMA' });
+      if (cmd === 'which' && a.includes('/'))
+        throw Object.assign(new Error('which only accepts command names, not paths'), { code: 'INVALID_SCHEMA' });
     }
 
     const cwdRaw = args.cwd || cfg.roots[0];

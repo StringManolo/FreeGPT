@@ -5,5 +5,6 @@ require('./web-fetch');
 require('./filesystem');
 require('./git');
 require('./terminal');
+require('./shell');
 
 module.exports = {};

@@ -10,23 +10,22 @@ const BASE = path.join(REPO, '.sandbox');
 const UDIR = process.env.UDOCKER_DIR || path.join(BASE, 'udocker');
 const VENV = path.join(BASE, 'venv');
 const LOCK = path.join(BASE, 'setup.lock');
-
-/* Patch python bug unable to use curl on spawn of new process */
 const PY_COMPAT = path.join(REPO, 'scripts', 'python-compat');
-function pythonPath() {
-  return [
-    PY_COMPAT,
-    process.env.PYTHONPATH
-  ].filter(Boolean).join(path.delimiter);
-}
 
-// loader x64: suposición mía, sin probar
+// Modo de ejecución fijo: F1 (fakechroot). No usar otros modos.
+const EXEC_MODE = 'F1';
+
+// loader x64: suposición, sin probar
 const ARCHS = {
   arm64: { platform: 'linux/arm64', loader: '/lib/ld-linux-aarch64.so.1', bundled: 'rootfs-aarch64.tar.gz' },
   x64:   { platform: 'linux/amd64', loader: '/lib64/ld-linux-x86-64.so.2', bundled: 'rootfs-x86_64.tar.gz' },
 };
-const DEFAULTS = { enabled: true, name: 'freegpt-agent', image: 'debian:bookworm-slim', packages: ['git', 'file'] };
-const PKG_RE = /^[a-z0-9][a-z0-9+.-]*$/;
+const DEFAULTS = {
+  enabled: true,
+  name: 'freegpt-agent',
+  image: 'debian:bookworm-slim',
+  packages: [], // dpkg no funciona en F1: los paquetes extra deben venir ya en el rootfs (scripts/build-rootfs.sh)
+};
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fail = (m) => Object.assign(new Error(m), { code: 'SANDBOX_UNAVAILABLE' });
@@ -38,35 +37,49 @@ const needed = (agentConfig) =>
   isOn(agentConfig) && ['terminal', 'git'].some((t) => agentConfig?.tools?.[t]?.enabled === true);
 
 // ---------- udocker ----------
+function pythonPath() {
+  // Parche de posix_spawn para los procesos Python hijos de udocker (no toca el Python global)
+  return [PY_COMPAT, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter);
+}
+
 function bin() {
   const v = path.join(VENV, 'bin', 'udocker');
   if (fs.existsSync(v)) return v;
   const dirs = [...(process.env.PATH || '').split(':'), path.join(os.homedir(), '.local', 'bin')];
-  for (const d of dirs) { const p = path.join(d, 'udocker'); if (d && fs.existsSync(p)) return p; }
+  for (const d of dirs) {
+    const p = path.join(d, 'udocker');
+    if (d && fs.existsSync(p)) return p;
+  }
   return 'udocker';
 }
+
 const pre = () => (process.getuid && process.getuid() === 0 ? ['--allow-root'] : []);
-/*const fullEnv = () => ({ ...process.env, UDOCKER_DIR: UDIR, PATH: `${path.join(os.homedir(), '.local', 'bin')}:${process.env.PATH || ''}` });
-const minimalEnv = () => ({ PATH: process.env.PATH || '/usr/bin:/bin', HOME: os.homedir(), UDOCKER_DIR: UDIR, LANG: 'C' });*/
+
 const fullEnv = () => ({
   ...process.env,
   UDOCKER_DIR: UDIR,
+  PYTHONPATH: pythonPath(),
   PATH: `${path.join(os.homedir(), '.local', 'bin')}:${process.env.PATH || ''}`,
-  PYTHONPATH: pythonPath()
 });
 
 const minimalEnv = () => ({
   PATH: process.env.PATH || '/usr/bin:/bin',
   HOME: os.homedir(),
   UDOCKER_DIR: UDIR,
+  PYTHONPATH: pythonPath(),
   LANG: 'C',
-  PYTHONPATH: pythonPath()
 });
+
 const U = (args, o = {}) => spawnSync(bin(), [...pre(), ...args], { env: fullEnv(), encoding: 'utf8', ...o });
 
 const exists = (n) => (U(['ps']).stdout || '').includes(`'${n}'`);
 const rootOf = (n) => (U(['inspect', '-p', n]).stdout || '').trim();
 const contDir = (n) => path.dirname(rootOf(n));
+
+// udocker guarda el modo en <contenedor>/execmode
+const modeOf = (n) => {
+  try { return fs.readFileSync(path.join(contDir(n), 'execmode'), 'utf8').trim(); } catch { return ''; }
+};
 
 function preflight() {
   if (process.platform !== 'linux')
@@ -84,7 +97,8 @@ function installUdocker() {
     let r = spawnSync('python3', ['-m', 'venv', VENV], { encoding: 'utf8' });
     if (r.status === 0) r = spawnSync(path.join(VENV, 'bin', 'pip'), ['install', '--quiet', 'udocker'], { encoding: 'utf8' });
     if (r.status !== 0) r = spawnSync('python3', ['-m', 'pip', 'install', '--user', '--break-system-packages', 'udocker'], { encoding: 'utf8' });
-    if (U(['version']).status !== 0) throw fail('no se pudo instalar udocker: ' + String(r.stderr || '').trim().split('\n').pop());
+    if (U(['version']).status !== 0)
+      throw fail('no se pudo instalar udocker: ' + String(r.stderr || '').trim().split('\n').pop());
   }
   if (U(['install']).status !== 0) throw fail('udocker no pudo descargar sus herramientas (¿red? ¿curl instalado?)');
 }
@@ -96,7 +110,9 @@ function fixLoader(name, a) {
   if (!fs.existsSync(f) || fs.statSync(f).size === 0) fs.writeFileSync(f, a.loader);
 }
 
+// El fichero testigo está en el host: si dentro del contenedor se ve, no hay aislamiento.
 function selftest(name) {
+  if (modeOf(name) !== EXEC_MODE) return false; // nunca ejecutar fuera de F1
   const w = path.join(os.homedir(), `.fgpt-witness-${crypto.randomBytes(6).toString('hex')}`);
   fs.writeFileSync(w, '');
   try {
@@ -116,46 +132,22 @@ function mountcheck(name) {
   return r.status === 0 && (r.stdout || '').trim() === m;
 }
 
-// ---------- paquetes dentro del contenedor ----------
-const wanted = (c) => [...new Set(c.packages || [])].sort();
-const markerOf = (name) => path.join(contDir(name), '.fgpt-packages');
-const packagesOk = (c) => {
-  const pk = wanted(c);
-  if (!pk.length) return true;
-  try { return fs.readFileSync(markerOf(c.name), 'utf8') === pk.join(' '); } catch { return false; }
-};
+// ---------- paquetes ----------
+// apt/dpkg dentro de F1 no funciona. Los paquetes extra (git, file) vienen ya instalados
+// en el rootfs incluido, generado por scripts/build-rootfs.sh.
+const packagesOk = () => true;
 function ensurePackages(c) {
-  const pk = wanted(c);
-  if (!pk.length || packagesOk(c)) return;
-  for (const p of pk) if (!PKG_RE.test(p)) throw fail(`nombre de paquete no válido: ${p}`);
-  const want = pk.join(' ');
-  const r = U(['run', '--nosysdirs', c.name, '/bin/sh', '-c',
-    `apt-get update && apt-get install -y --no-install-recommends ${want} && rm -rf /var/lib/apt/lists/*`], { timeout: 900000 });
-  if (r.status !== 0) throw fail(`no se pudieron instalar paquetes en el sandbox (${want}): ` +
-    String(r.stderr || '').trim().split('\n').slice(-3).join(' | '));
-  fs.writeFileSync(markerOf(c.name), want);
+  if ((c.packages || []).length)
+    console.warn('[freegpt] agent.sandbox.packages se ignora: dpkg no funciona en F1');
 }
 
 // ---------- creación ----------
-function slim(name) {
-  const r = rootOf(name);
-  for (const p of ['usr/share/doc', 'usr/share/man', 'usr/share/info', 'usr/share/locale'])
-    fs.rmSync(path.join(r, p), { recursive: true, force: true });
-  for (const p of ['var/cache/apt', 'var/lib/apt/lists', 'var/log']) {
-    const d = path.join(r, p);
-    if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) fs.rmSync(path.join(d, f), { recursive: true, force: true });
-  }
-  fs.mkdirSync(path.join(r, 'etc/apt/apt.conf.d'), { recursive: true });
-  fs.writeFileSync(path.join(r, 'etc/apt/apt.conf.d/99root'), 'APT::Sandbox::User "root";\n');
-}
-
-function build(c, a, make, doSlim) {
+function build(c, a, make) {
   const drop = () => { if (exists(c.name)) U(['rm', c.name]); };
   const r = make();
   if (r.status !== 0 || !exists(c.name)) { drop(); return false; }
-  U(['setup', '--execmode=F1', c.name]);
+  U(['setup', `--execmode=${EXEC_MODE}`, c.name]);
   fixLoader(c.name, a);
-  if (doSlim) slim(c.name);
   if (!selftest(c.name)) { drop(); return false; }
   return true;
 }
@@ -166,19 +158,22 @@ async function setup(c) {
   if (exists(c.name)) {
     fixLoader(c.name, a);
     if (selftest(c.name)) { ensurePackages(c); return; }
-    U(['rm', c.name]); // roto: se recrea
+    U(['rm', c.name]); // roto o fuera de F1: se recrea
   }
   const tar = path.join(REPO, 'sandbox', a.bundled);
   let ok = false;
   if (fs.existsSync(tar)) // rootfs incluido, solo si es de ESTA arquitectura
-    ok = build(c, a, () => U(['import', '--tocontainer', `--name=${c.name}`, tar, 'freegpt-agent:bundled']), false);
-  if (!ok) // fallback: imagen oficial para la arquitectura del usuario
+    ok = build(c, a, () => U(['import', '--tocontainer', `--name=${c.name}`, tar, 'freegpt-agent:bundled']));
+  if (!ok) // fallback: imagen oficial para la arquitectura del usuario (sin git ni file)
     ok = build(c, a, () => {
       const p = U(['pull', `--platform=${a.platform}`, c.image]);
       return p.status === 0 ? U(['create', `--name=${c.name}`, c.image]) : p;
-    }, true);
+    });
   if (!ok) throw fail('no se pudo crear un sandbox que aísle de verdad.');
-  if (!mountcheck(c.name)) { U(['rm', c.name]); throw fail('este udocker no permite montar rutas del host con la misma ruta (necesario para allow_paths).'); }
+  if (!mountcheck(c.name)) {
+    U(['rm', c.name]);
+    throw fail('este udocker no permite montar rutas del host con la misma ruta (necesario para allow_paths).');
+  }
   ensurePackages(c);
 }
 
@@ -199,7 +194,9 @@ async function withLock(fn, timeoutMs = 600000) {
 }
 
 // ---------- API ----------
-let pending = null, readyFor = null, failure = null;
+let pending = null;
+let readyFor = null;
+let failure = null;
 
 function ensureReady(agentConfig) {
   const c = cfgOf(agentConfig);
@@ -228,7 +225,7 @@ function execFileIn(agentConfig, mounts, cmd, args, opts, cb) {
   }
   const vols = [...new Set(mounts || [])].flatMap((m) => ['-v', `${m}:${m}`]);
   const envs = Object.entries(opts.env || {})            // el entorno del host NO entra,
-    .filter(([k]) => k !== 'HOME' && k !== 'PATH')       // solo lo que el tool pide explícitamente
+    .filter(([k]) => k !== 'HOME' && k !== 'PATH')       // solo lo que la tool pide explícitamente
     .flatMap(([k, v]) => ['-e', `${k}=${v}`]);
   const full = [...pre(), '-q', 'run', '--nosysdirs', ...vols, ...envs, `--workdir=${opts.cwd}`, c.name, cmd, ...args];
   return execFile(bin(), full, { ...opts, env: minimalEnv() }, cb);
