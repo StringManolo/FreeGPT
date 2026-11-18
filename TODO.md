@@ -32,3 +32,6 @@
 - Update bash client with new features (like agent)
 - Terminal might be redundant with shell (shell runs only on sandbox do)
 - Clean the udocker storage to free space (outside of the project, just a reminder for the dev)
+- Update help with --track-agent
+- Update README.md
+- Add Warning/Danger red icon to shell
