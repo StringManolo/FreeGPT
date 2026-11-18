@@ -35,3 +35,4 @@
 - Update help with --track-agent
 - Update README.md
 - Add Warning/Danger red icon to shell
+- Test clone in clean Debian live CD
