@@ -253,6 +253,268 @@ class Router {
     throw err;
   }
 
+  async chatCompletionStream({
+    model: logicalModel,
+    messages,
+    options = {},
+    signal,
+    onChunk
+  }) {
+    const fullChain = this.resolveChain(logicalModel);
+
+    if (fullChain.length === 0) {
+      const err = new Error(`No providers configured for model "${logicalModel}".`);
+      err.code = "NO_CHAIN";
+      throw err;
+    }
+
+    const chain = fullChain.filter((step) => this.providers.has(step.provider));
+    if (chain.length === 0) {
+      const skipped = fullChain.map((step) => step.provider);
+      const err = new Error(
+        `All providers for "${logicalModel}" were skipped at startup (${skipped.join(", ")}).`
+      );
+      err.code = "NO_PROVIDERS";
+      err.skipped = skipped;
+      throw err;
+    }
+
+    const startTime = Date.now();
+    const attempts = [];
+    const errors = [];
+    const estimated = estimateTokens(messages);
+    let emitted = false;
+
+    for (const step of chain) {
+      const adapter = this.providers.get(step.provider);
+      const pool = this.pools.get(step.provider);
+      if (!adapter || !pool) continue;
+
+      if (typeof adapter.chatCompletionStream !== "function") {
+        errors.push(`${step.provider}: streaming is not implemented`);
+        continue;
+      }
+
+      if (this.cooldown.isCoolingDown(step.provider)) {
+        errors.push(`${step.provider}: provider cooling down`);
+        continue;
+      }
+
+      const triedKeys = new Set();
+      let keyErrors = 0;
+      let nonKeyErrors = 0;
+
+      while (true) {
+        if (signal?.aborted) {
+          const err = new Error("Request cancelled by client.");
+          err.code = "CANCELLED";
+          throw err;
+        }
+
+        const acquired = pool.acquire(step.model, estimated, triedKeys);
+        if (!acquired) break;
+
+        const { entry } = acquired;
+        triedKeys.add(entry.id);
+
+        const attemptStart = Date.now();
+        const record = {
+          provider: step.provider,
+          key: entry.id,
+          model: step.model,
+          attempt: attempts.length + 1,
+          status: "trying",
+          startedAt: attemptStart
+        };
+        attempts.push(record);
+
+        const controller = new AbortController();
+        let timedOut = false;
+        let cancelled = false;
+
+        const onExternalAbort = () => {
+          cancelled = true;
+          controller.abort();
+        };
+
+        if (signal) {
+          if (signal.aborted) {
+            cancelled = true;
+            controller.abort();
+          } else {
+            signal.addEventListener("abort", onExternalAbort, { once: true });
+          }
+        }
+
+        // Timeout de inactividad: cada fragmento recibido reinicia
+        // el contador. Una generación larga no expira si sigue avanzando.
+        let timer = null;
+        const resetInactivityTimeout = () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+          }, this.timeoutMs);
+        };
+        resetInactivityTimeout();
+
+        let usage = null;
+        let outputChars = 0;
+
+        try {
+          const stream = adapter.chatCompletionStream({
+            model: step.model,
+            messages,
+            options,
+            apiKey: entry.secret,
+            signal: controller.signal
+          });
+
+          for await (const chunk of stream) {
+            resetInactivityTimeout();
+
+            if (signal?.aborted || cancelled) {
+              const err = new Error("Request cancelled by client.");
+              err.code = "CANCELLED";
+              throw err;
+            }
+
+            if (chunk?.usage) usage = chunk.usage;
+
+            const content = chunk?.choices?.[0]?.delta?.content;
+            if (typeof content === "string" && content.length > 0) {
+              emitted = true;
+              outputChars += content.length;
+
+              const meta = {
+                logicalModel,
+                provider: step.provider,
+                key: entry.id,
+                model: step.model,
+                attempts,
+                totalMs: Date.now() - startTime
+              };
+
+              if (typeof onChunk === "function") {
+                onChunk(content, meta);
+              }
+            }
+          }
+
+          clearTimeout(timer);
+          if (signal) signal.removeEventListener("abort", onExternalAbort);
+
+          const tokensUsed =
+            usage?.total_tokens ||
+            usage?.totalTokenCount ||
+            Math.ceil(outputChars / 4);
+
+          pool.recordSuccess(entry, step.model, tokensUsed);
+          record.status = "ok";
+          record.durationMs = Date.now() - attemptStart;
+          this.cooldown.recordSuccess(step.provider);
+          this.persist();
+
+          return {
+            meta: {
+              logicalModel,
+              provider: step.provider,
+              key: entry.id,
+              model: step.model,
+              attempts,
+              totalMs: Date.now() - startTime
+            }
+          };
+        } catch (err) {
+          clearTimeout(timer);
+          if (signal) signal.removeEventListener("abort", onExternalAbort);
+
+          if (cancelled || signal?.aborted) {
+            const cancelledError = new Error("Request cancelled by client.");
+            cancelledError.code = "CANCELLED";
+            throw cancelledError;
+          }
+
+          if (timedOut) {
+            err = new Error(`Request timed out after ${this.timeoutMs} ms`);
+            err.code = "ETIMEDOUT";
+          }
+
+          record.status = "failed";
+          record.error = cleanProviderError(err.message);
+          record.errorStatus = err.status || 0;
+          record.durationMs = Date.now() - attemptStart;
+
+          const status = err.status || 0;
+
+          if (emitted) {
+            pool.recordNeutralFailure(entry);
+            this.persist();
+            err.streamStarted = true;
+            err.attempts = attempts;
+            throw err;
+          }
+
+          if (status === 401 || status === 403) {
+            pool.recordAuthFailure(entry);
+            keyErrors++;
+            errors.push(`${step.provider}/${entry.id}: auth failed`);
+            continue;
+          }
+
+          if (status === 429) {
+            pool.recordRateLimit(entry, step.model, parseRetryAfterMs(err.message));
+            keyErrors++;
+            errors.push(`${step.provider}/${entry.id}: rate limited`);
+            continue;
+          }
+
+          if (status === 413) {
+            pool.recordNeutralFailure(entry);
+            errors.push(`${step.provider}/${entry.id}: payload too large`);
+            break;
+          }
+
+          pool.recordNeutralFailure(entry);
+          nonKeyErrors++;
+          errors.push(`${step.provider}/${entry.id}: ${record.error}`);
+        }
+      }
+
+      if (nonKeyErrors > 0 && keyErrors === 0) {
+        this.cooldown.recordFailure(step.provider, 60_000);
+      }
+      this.persist();
+    }
+
+    if (attempts.length > 0 && attempts.every(isContextError)) {
+      const err = new Error(
+        "The conversation exceeds the token limit of every configured provider."
+      );
+      err.code = "CONTEXT_EXCEEDED";
+      err.attempts = attempts;
+      throw err;
+    }
+
+    const anyRateLimit = attempts.some((attempt) => attempt.errorStatus === 429);
+    const allRateLimit =
+      attempts.length > 0 && attempts.every((attempt) => attempt.errorStatus === 429);
+    const anyAuth = attempts.some(
+      (attempt) => attempt.errorStatus === 401 || attempt.errorStatus === 403
+    );
+
+    let code = "ALL_FAILED";
+    if (allRateLimit) code = "ALL_RATE_LIMITED";
+    else if (anyRateLimit && !anyAuth) code = "SOME_RATE_LIMITED";
+    else if (anyAuth) code = "AUTH_FAILED";
+
+    const err = new Error(`All providers failed for "${logicalModel}".`);
+    err.code = code;
+    err.attempts = attempts;
+    err.summary = errors.join("\n");
+    throw err;
+  }
+
   withTimeout(promise, ms, externalSignal) {
     return new Promise((resolve, reject) => {
       let timer = null;

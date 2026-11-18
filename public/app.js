@@ -93,9 +93,16 @@ function escapeHtml(s) {
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   }[c]));
 }
-function isNearBottom(box, threshold = 120) {
+function isNearBottom(box, threshold = 80) {
   return box.scrollHeight - box.scrollTop - box.clientHeight < threshold;
 }
+
+// Seguimiento automático del final de la conversación.
+let autoFollowMessages = true;
+
+$("#messages").addEventListener("scroll", () => {
+  autoFollowMessages = isNearBottom($("#messages"));
+}, { passive: true });
 function toast(msg) {
   let el = document.getElementById("toast");
   if (!el) {
@@ -322,6 +329,41 @@ function scheduleRender() {
   });
 }
 
+// Actualiza solamente el mensaje que está recibiendo tokens.
+// No reconstruye el historial completo durante el streaming.
+let pendingStreamingRender = false;
+let pendingStreamingMessage = null;
+
+function scheduleStreamingRender(msg) {
+  pendingStreamingMessage = msg;
+  if (pendingStreamingRender) return;
+
+  pendingStreamingRender = true;
+  requestAnimationFrame(() => {
+    pendingStreamingRender = false;
+    const current = pendingStreamingMessage;
+    pendingStreamingMessage = null;
+    if (current) updateStreamingMessage(current);
+  });
+}
+
+function updateStreamingMessage(msg) {
+  const box = $("#messages");
+
+  const current = Array.from(box.querySelectorAll(".message"))
+    .find((el) => el.dataset.msgId === msg.id);
+
+  const replacement = renderMessage(msg);
+
+  if (current) {
+    current.replaceWith(replacement);
+  } else {
+    box.appendChild(replacement);
+  }
+
+  if (autoFollowMessages) scrollToBottom();
+}
+
 function renderMessages() {
   const conv = getActive();
   const box = $("#messages");
@@ -380,6 +422,14 @@ function renderMessage(msg) {
     bubble.textContent = msg.content;
   }
   wrap.appendChild(bubble);
+
+  // El estado nunca debe formar parte del Markdown generado.
+  if (msg.role === "assistant" && msg.status === "stopped") {
+    const stopped = document.createElement("span");
+    stopped.className = "message-status stopped";
+    stopped.textContent = "Stopped";
+    wrap.appendChild(stopped);
+  }
 
   if (msg.role === "user" && msg.attachments?.length) {
     wrap.appendChild(renderMessageAttachments(msg.attachments));
@@ -967,6 +1017,7 @@ async function streamAssistantResponse(conv) {
     freegpt: null,
     agentEvents: []
   };
+  autoFollowMessages = true;
   conv.messages.push(assistant);
   saveConversations();
   renderMessages();
@@ -1051,7 +1102,10 @@ async function streamAssistantResponse(conv) {
           if (evt.choices?.[0]?.finish_reason) { assistant.status = "done"; needsRender = true; }
         }
       }
-      if (needsRender) { needsRender = false; scheduleRender(); }
+      if (needsRender) {
+        needsRender = false;
+        scheduleStreamingRender(assistant);
+      }
     }
 
     assistant.status = "done";
@@ -1059,7 +1113,6 @@ async function streamAssistantResponse(conv) {
   } catch (err) {
     if (err.name === "AbortError") {
       assistant.status = "stopped";
-      assistant.content += "\n\n_(stopped)_";
     } else if (err.contextExceeded) {
       conv.messages.pop();
       saveConversations();
