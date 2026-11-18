@@ -28,3 +28,5 @@
 - PRIORITY: Use secure folder for agent (probably a proot is needed or something similar)
 - Add ability to install tools in the system (also install them if any of of the reqjired ones are missing, like git)
 - Add a Free Agent mode. (no limits, just a sleep between calls to don't exhaust resources or providers)
+- Update / make a good README with images
+- Update bash client with new features (like agent)

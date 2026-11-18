@@ -14,6 +14,7 @@ function makeSandbox() {
   return root;
 }
 const cfgFor = (root) => ({
+  sandbox: { enabled: false },
   tools: { terminal: { enabled: true, allow_paths: [root], allow_commands: ['ls', 'cat', 'pwd'] } },
 });
 

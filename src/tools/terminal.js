@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { registerTool } = require('./registry');
+const sandbox = require('../sandbox');
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;
@@ -51,12 +52,16 @@ function buildConfig(agentConfig) {
   };
 }
 
-function runWithRunner(argv, cwd, timeoutMs, maxBytes, runner) {
+function runWithRunner(argv, cwd, timeoutMs, maxBytes, runner, agentConfig, roots) {
   const finalArgv = runner.length ? [...runner, ...argv] : argv;
   const cmd = finalArgv[0];
   const args = finalArgv.slice(1);
+
+  const run = runner.length  
+    ? execFile
+    : (c, a, o, cb) => sandbox.execFileIn(agentConfig, roots, c, a, o, cb);
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, {
+    run(cmd, args, {  
       cwd, timeout: timeoutMs, maxBuffer: maxBytes,
       env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: process.env.HOME, LANG: 'C', LC_ALL: 'C' },
     }, (err, stdout, stderr) => {
@@ -98,7 +103,7 @@ registerTool({
   async execute(args, ctx) {
     const cfg = buildConfig(ctx.agentConfig);
     if (!cfg) throw Object.assign(new Error('terminal not enabled or no allow_paths.'), { code: 'TOOL_DISABLED' });
-
+    if (!cfg.runner.length) await sandbox.ensureReady(ctx.agentConfig);
     const cmd = args.command.trim();
     if (!cfg.allowCommands.includes(cmd))
       throw Object.assign(new Error(`command not in allow_commands: ${cmd}`), { code: 'PERMISSION_DENIED' });
@@ -126,7 +131,7 @@ registerTool({
     }
 
     const timeout = Math.min(args.timeout_ms ?? cfg.timeoutMs, 60_000);
-    const result = await runWithRunner([cmd, ...finalArgs], cwd, timeout, cfg.maxOutputBytes, cfg.runner);
+    const result = await runWithRunner([cmd, ...finalArgs], cwd, timeout, cfg.maxOutputBytes, cfg.runner, ctx.agentConfig, cfg.roots);
     return { command: cmd, args: userArgs, cwd, ...result };
   },
 });

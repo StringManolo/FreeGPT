@@ -2,8 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
 const { registerTool } = require('./registry');
+const sandbox = require('../sandbox');
 
 const MAX_OUTPUT_BYTES = 128 * 1024;
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -38,9 +38,9 @@ function buildAllowedRoots(agentConfig) {
   return cfg.allow_paths.map(realResolve);
 }
 
-function runGit(cwd, args, timeoutMs) {
+function runGit(agentConfig, roots, cwd, args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    execFile('git', args, {
+    sandbox.execFileIn(agentConfig, roots, 'git', args, {
       cwd, timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES,
       env: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C',
              GIT_TERMINAL_PROMPT: '0', GIT_PAGER: 'cat', PAGER: 'cat' },
@@ -82,13 +82,14 @@ registerTool({
   async execute(args, ctx) {
     const roots = buildAllowedRoots(ctx.agentConfig);
     if (!roots) throw Object.assign(new Error('git has no allow_paths.'), { code: 'TOOL_DISABLED' });
+    await sandbox.ensureReady(ctx.agentConfig);
     const cwdRaw = args.cwd || roots[0];
     const cwd = realResolve(cwdRaw);
     if (!roots.some((root) => isInside(root, cwd)))
       throw Object.assign(new Error(`cwd outside allow_paths: ${cwd}`), { code: 'PERMISSION_DENIED' });
     const cfg = ctx.agentConfig?.tools?.git;
     const timeout = Math.min(args.timeout_ms ?? cfg?.timeout_ms ?? DEFAULT_TIMEOUT_MS, 60_000);
-    const result = await runGit(cwd, ALLOWED_OPS[args.operation], timeout);
+    const result = await runGit(ctx.agentConfig, roots, cwd, ALLOWED_OPS[args.operation], timeout);
     return { operation: args.operation, cwd, ...result };
   },
 });

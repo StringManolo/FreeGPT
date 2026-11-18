@@ -429,8 +429,15 @@ routing:
         priority: 4
 
 # ─── Agent (FGTP) ─────────────────────────────────────────────────────
-# ─── Agent (FGTP) ─────────────────────────────────────────────────────
 agent:
+  agent:
+  sandbox:
+    # true (por defecto): terminal y git corren dentro de un Debian aislado (udocker).
+    # false: corren directamente en tu sistema, SIN aislamiento.
+    enabled: true
+    name: freegpt-agent
+    image: debian:bookworm-slim   # solo se usa si no hay rootfs incluido para tu arquitectura
+    packages: [git, file]         # se instalan dentro del sandbox la primera vez
   limits:
     max_iterations: 15
     max_calls: 20
