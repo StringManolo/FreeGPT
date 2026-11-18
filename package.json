@@ -7,14 +7,11 @@
     "freegpt": "src/cli.js",
     "freegpt-client": "bin/freegpt-client.sh"
   },
-  "files": [
-    "src/",
-    "bin/",
-    "config.demo.yaml",
-    "README.md"
-  ],
+  "files": ["src/", "bin/", "scripts/", "sandbox/", "config.demo.yaml", "README.md"],
   "scripts": {
-    "start": "node src/cli.js serve"
+  "start": "node src/cli.js serve",
+  "test": "node --test test/",
+  "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",

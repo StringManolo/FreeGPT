@@ -28,3 +28,11 @@
 - PRIORITY: Use secure folder for agent (probably a proot is needed or something similar)
 - Add ability to install tools in the system (also install them if any of of the reqjired ones are missing, like git)
 - Add a Free Agent mode. (no limits, just a sleep between calls to don't exhaust resources or providers)
+- Update / make a good README with images
+- Update bash client with new features (like agent)
+- Terminal might be redundant with shell (shell runs only on sandbox do)
+- Clean the udocker storage to free space (outside of the project, just a reminder for the dev)
+- Update help with --track-agent
+- Update README.md
+- Add Warning/Danger red icon to shell
+- Test clone in clean Debian live CD

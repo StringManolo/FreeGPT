@@ -42,7 +42,7 @@ function realResolve(p) {
   }
 }
 
-const PATH_TOOLS = new Set(['filesystem', 'git', 'terminal']);
+const PATH_TOOLS = new Set(['filesystem', 'git', 'terminal, shell']);
 
 function checkPermission(toolName, args, ctx, agentConfig) {
   const cfg = agentConfig && agentConfig.tools && agentConfig.tools[toolName];

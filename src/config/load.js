@@ -4,6 +4,28 @@ const fs = require("fs");
 const yaml = require("js-yaml");
 const { readSecrets } = require("./secrets");
 
+const path = require("path");
+const os = require("os");
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+
+function expandPath(p) {
+  if (typeof p !== "string" || !p) return p;
+  const s = p.replace(/^\{repo\}/, REPO_ROOT).replace(/^~(?=$|[\\/])/, os.homedir());
+  return path.isAbsolute(s) ? s : path.resolve(REPO_ROOT, s);
+}
+
+function expandAgentPaths(agent) {
+  for (const t of Object.values((agent && agent.tools) || {})) {
+    if (!t || !Array.isArray(t.allow_paths)) continue;
+    t.allow_paths = t.allow_paths.map(expandPath);
+    for (const p of t.allow_paths) {
+      // solo crea carpetas DENTRO del repo (un typo en el config no debe crear rutas por el disco)
+      if (p.startsWith(REPO_ROOT + path.sep)) { try { fs.mkdirSync(p, { recursive: true }); } catch (_) {} }
+    }
+  }
+  return agent;
+}
+
 const ENV_PREFIX = "env.";
 
 function loadYaml(configPath) {
@@ -138,6 +160,7 @@ function loadConfig(configPath) {
 
   const agent = tryResolve(raw.agent || {}, "agent");
   config.agent = agent.ok ? agent.value : raw.agent || {};
+  expandAgentPaths(config.agent);
 
   const settings = tryResolve(raw.settings || {}, "settings");
   config.settings = settings.ok ? settings.value : raw.settings || {};

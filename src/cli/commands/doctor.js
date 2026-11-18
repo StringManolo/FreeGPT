@@ -178,6 +178,7 @@ async function runDoctor(cli) {
   printIssues(c, providerResults, verbose);
   printModelGroups(c, config);
   printWarnings(c, warnings);
+  await printSandbox(c, config);
 
   const anyOk = providerResults.some((pr) => pr.summary.ok > 0);
   const anyFail = providerResults.some((pr) => pr.summary.fail > 0);
@@ -299,6 +300,25 @@ function printWarnings(c, warnings) {
   if (warnings.length === 0) return;
   console.log(c.bold("Warnings:"));
   for (const w of warnings) console.log(`  ${c.yellow("!")} ${w}`);
+  console.log("");
+}
+
+async function printSandbox(c, config) {
+  const sandbox = require("../../sandbox");
+  const agent = config.agent || {};
+  console.log(c.bold("Agent sandbox:"));
+  if (!sandbox.isOn(agent)) {
+    console.log(c.yellow("  ⚠ desactivado (agent.sandbox.enabled: false): el agente corre SIN aislamiento"));
+  } else if (!sandbox.needed(agent)) {
+    console.log("  (sin tools terminal/git habilitadas, nada que aislar)");
+  } else {
+    try {
+      const r = await sandbox.ensureReady(agent);
+      console.log(c.green(`  ✓ ${r.mode} (${r.name})`));
+    } catch (e) {
+      console.log(c.red(`  ✗ ${e.message}`));
+    }
+  }
   console.log("");
 }
 
