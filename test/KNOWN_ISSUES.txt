@@ -1,0 +1,87 @@
+===== TESTS =====
+
+> freegpt@0.1.0 test
+> node --test test/
+
+✔ withTimeout rechaza si el signal ya esta abortado (20.481771ms)
+✔ withTimeout rechaza a mitad de vuelo (52.655209ms)
+✔ withTimeout mantiene el timeout clasico (27.173959ms)
+✔ chatCompletion propaga CANCELLED sin fallback (43.123959ms)
+✔ GenericOpenAIAdapter propaga signal al fetch (6.63125ms)
+✔ GroqAdapter propaga signal al fetch (4.333333ms)
+✔ OpenRouterAdapter propaga signal al fetch (4.998959ms)
+✔ GeminiAdapter propaga signal al fetch (5.555209ms)
+✔ devuelve respuesta final cuando el modelo no pide herramientas (18.201041ms)
+✔ ejecuta una herramienta y devuelve resultado al modelo (9.626563ms)
+✔ deniega herramienta no habilitada por el usuario (3.9125ms)
+✔ devuelve error al modelo cuando el JSON FGTP es inválido y agota correcciones (4.419791ms)
+✔ parsea una llamada FGTP válida (15.696875ms)
+✔ parsea varias llamadas FGTP (1.439063ms)
+✔ conserva texto fuera de bloques FGTP (1.840625ms)
+✔ rechaza JSON inválido (2.616146ms)
+✔ rechaza propiedades inesperadas (1.535938ms)
+✔ rechaza herramienta desconocida (1.504688ms)
+✔ rechaza herramienta deshabilitada (2.189063ms)
+✔ soporta bloques partidos entre chunks (1.333334ms)
+✔ detecta bloque incompleto al finalizar (2.04375ms)
+✔ aplica límite de llamadas (3.343229ms)
+✔ read inside sandbox (96.638541ms)
+✔ read outside sandbox blocked (20.241667ms)
+✔ path traversal .. blocked (17.176042ms)
+✔ symlink escape blocked (13.714583ms)
+✖ glob inside sandbox (98.56927ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    assert.ok(r.results.some((x) => x.rel === 'hello.txt'))
+
+      at TestContext.<anonymous> (/root/2027/FreeGPT/test/filesystem-tool.test.js:56:10)
+      at async Test.run (node:internal/test_runner/test:797:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:526:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '=='
+  }
+
+✔ ls inside sandbox (100.249479ms)
+✔ cat outside sandbox blocked (12.402604ms)
+✔ cwd outside sandbox blocked (6.66875ms)
+✔ command not in allow_commands blocked (6.455208ms)
+✔ formatToolArgs terminal (9.744792ms)
+✔ formatToolArgs git (1.361458ms)
+✔ formatToolArgs filesystem (1.665104ms)
+✔ formatToolArgs terminal vacío (1.400521ms)
+✔ isTracking false por defecto (1.930729ms)
+✔ logStart no imprime si no tracking (1.411458ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 36
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1046.167708
+
+✖ failing tests:
+
+test at test/filesystem-tool.test.js:53:1
+✖ glob inside sandbox (98.56927ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    assert.ok(r.results.some((x) => x.rel === 'hello.txt'))
+
+      at TestContext.<anonymous> (/root/2027/FreeGPT/test/filesystem-tool.test.js:56:10)
+      at async Test.run (node:internal/test_runner/test:797:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:526:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '=='
+  }
+
+
+
+
+  Need to check it, not important

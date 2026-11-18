@@ -1,6 +1,6 @@
 "use strict";
 
-const { ProviderAdapter } = require("./base");
+const { ProviderAdapter, parseSseStream } = require("./base");
 
 function toGeminiRequest(messages) {
   const contents = [];
@@ -78,6 +78,80 @@ class GeminiAdapter extends ProviderAdapter {
     }
 
     return toOpenAIResponse(await response.json(), model);
+  }
+
+  async *chatCompletionStream({ model, messages, options = {}, apiKey, signal }) {
+    const key = apiKey || this.getDefaultKey();
+    if (!key) throw new Error(`No API key available for "${this.name}".`);
+
+    const url =
+      `${this.baseUrl}/models/${encodeURIComponent(model)}:streamGenerateContent` +
+      `?alt=sse&key=${encodeURIComponent(key)}`;
+
+    const generationConfig = {};
+    if (options.temperature != null) generationConfig.temperature = options.temperature;
+    if (options.max_tokens != null) generationConfig.maxOutputTokens = options.max_tokens;
+    if (options.top_p != null) generationConfig.topP = options.top_p;
+
+    const body = toGeminiRequest(messages);
+    if (Object.keys(generationConfig).length > 0) {
+      body.generationConfig = generationConfig;
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      const error = new Error(
+        `Gemini ${response.status} ${response.statusText}: ${text.slice(0, 300)}`
+      );
+      error.status = response.status;
+      throw error;
+    }
+
+    for await (const event of parseSseStream(response)) {
+      const candidate = event.candidates?.[0];
+      const parts = candidate?.content?.parts || [];
+      const content = parts.map((part) => part.text || "").join("");
+
+      if (content) {
+        yield {
+          id: event.responseId || `gemini-${Date.now()}`,
+          object: "chat.completion.chunk",
+          model,
+          choices: [{
+            index: 0,
+            delta: { content },
+            finish_reason: null
+          }]
+        };
+      }
+
+      if (event.usageMetadata) {
+        yield {
+          usage: {
+            prompt_tokens: event.usageMetadata.promptTokenCount || 0,
+            completion_tokens: event.usageMetadata.candidatesTokenCount || 0,
+            total_tokens: event.usageMetadata.totalTokenCount || 0
+          }
+        };
+      }
+
+      if (candidate?.finishReason) {
+        yield {
+          choices: [{
+            index: 0,
+            delta: {},
+            finish_reason: candidate.finishReason.toLowerCase()
+          }]
+        };
+      }
+    }
   }
 
   async healthCheck() {

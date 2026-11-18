@@ -124,13 +124,15 @@ async function handleChat(req, res, router) {
   const { model, messages, stream, ...options } = body;
 
   try {
+    if (stream) {
+      return await streamChatAsSse(res, router, { model, messages, options });
+    }
+
     const { completion, meta } = await router.chatCompletion({
       model,
       messages,
       options
     });
-
-    if (stream) return streamAsSse(res, completion, meta);
 
     completion.freegpt = meta;
     return sendJson(res, 200, completion);
@@ -434,53 +436,133 @@ function sendError(res, status, message, code = "error") {
   });
 }
 
-function streamAsSse(res, completion, meta) {
-  const id = completion.id || `chatcmpl-${Date.now()}`;
-  const created = completion.created || Math.floor(Date.now() / 1000);
-  const model = completion.model || "unknown";
-  const content = completion.choices?.[0]?.message?.content ?? "";
+async function streamChatAsSse(res, router, { model, messages, options }) {
+  const controller = new AbortController();
+  const id = `chatcmpl-${Date.now()}`;
+  const created = Math.floor(Date.now() / 1000);
+  let started = false;
+  let responseModel = model;
 
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream; charset=utf-8",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive"
-  });
+  const send = (obj) => {
+    if (!res.destroyed && !res.writableEnded) {
+      res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    }
+  };
 
-  const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  const start = (meta) => {
+    if (started) return;
+    started = true;
+    responseModel = meta?.model || model;
 
-  send({ freegpt: meta });
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
+    });
 
-  send({
-    id,
-    object: "chat.completion.chunk",
-    created,
-    model,
-    choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }]
-  });
+    send({ freegpt: meta });
 
-  const CHUNK = 20;
-  for (let i = 0; i < content.length; i += CHUNK) {
     send({
       id,
       object: "chat.completion.chunk",
       created,
-      model,
-      choices: [
-        { index: 0, delta: { content: content.slice(i, i + CHUNK) }, finish_reason: null }
-      ]
+      model: responseModel,
+      choices: [{
+        index: 0,
+        delta: { role: "assistant" },
+        finish_reason: null
+      }]
     });
+  };
+
+  const onClose = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  res.on("close", onClose);
+
+  try {
+    const result = await router.chatCompletionStream({
+      model,
+      messages,
+      options,
+      signal: controller.signal,
+      onChunk(content, meta) {
+        if (res.destroyed || res.writableEnded) return;
+        start(meta);
+        send({
+          id,
+          object: "chat.completion.chunk",
+          created,
+          model: responseModel,
+          choices: [{
+            index: 0,
+            delta: { content },
+            finish_reason: null
+          }]
+        });
+      }
+    });
+
+    if (res.destroyed || res.writableEnded) return;
+
+    start(result.meta);
+
+    send({
+      id,
+      object: "chat.completion.chunk",
+      created,
+      model: responseModel,
+      choices: [{
+        index: 0,
+        delta: {},
+        finish_reason: "stop"
+      }]
+    });
+
+    res.write("data: [DONE]\n\n");
+    res.end();
+  } catch (err) {
+    if (controller.signal.aborted || res.destroyed || res.writableEnded) {
+      if (!res.writableEnded && !res.destroyed) res.end();
+      return;
+    }
+
+    if (!started) {
+      throw err;
+    }
+
+    const message = err.message || "Streaming provider error";
+
+    send({
+      id,
+      object: "chat.completion.chunk",
+      created,
+      model: responseModel,
+      choices: [{
+        index: 0,
+        delta: { content: `\n\n[FreeGPT stream error: ${message}]` },
+        finish_reason: null
+      }]
+    });
+
+    send({
+      id,
+      object: "chat.completion.chunk",
+      created,
+      model: responseModel,
+      choices: [{
+        index: 0,
+        delta: {},
+        finish_reason: "stop"
+      }]
+    });
+
+    res.write("data: [DONE]\n\n");
+    res.end();
+  } finally {
+    res.removeListener("close", onClose);
   }
-
-  send({
-    id,
-    object: "chat.completion.chunk",
-    created,
-    model,
-    choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
-  });
-
-  res.write("data: [DONE]\n\n");
-  res.end();
 }
 
 module.exports = { start };

@@ -1,6 +1,6 @@
 "use strict";
 
-const { ProviderAdapter } = require("./base");
+const { ProviderAdapter, parseSseStream } = require("./base");
 
 class GenericOpenAIAdapter extends ProviderAdapter {
   constructor(name, config) {
@@ -36,6 +36,33 @@ class GenericOpenAIAdapter extends ProviderAdapter {
     }
 
     return response.json();
+  }
+
+  async *chatCompletionStream({ model, messages, options = {}, apiKey, signal }) {
+    const key = apiKey || this.getDefaultKey();
+    if (!key) throw new Error(`No API key available for "${this.name}".`);
+
+    const url = `${this.baseUrl}/chat/completions`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`
+      },
+      body: JSON.stringify({ model, messages, ...options, stream: true }),
+      signal
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      const error = new Error(
+        `${this.name} ${response.status} ${response.statusText}: ${text.slice(0, 300)}`
+      );
+      error.status = response.status;
+      throw error;
+    }
+
+    yield* parseSseStream(response);
   }
 
   async healthCheck() {
