@@ -11,6 +11,15 @@ const UDIR = process.env.UDOCKER_DIR || path.join(BASE, 'udocker');
 const VENV = path.join(BASE, 'venv');
 const LOCK = path.join(BASE, 'setup.lock');
 
+/* Patch python bug unable to use curl on spawn of new process */
+const PY_COMPAT = path.join(REPO, 'scripts', 'python-compat');
+function pythonPath() {
+  return [
+    PY_COMPAT,
+    process.env.PYTHONPATH
+  ].filter(Boolean).join(path.delimiter);
+}
+
 // loader x64: suposición mía, sin probar
 const ARCHS = {
   arm64: { platform: 'linux/arm64', loader: '/lib/ld-linux-aarch64.so.1', bundled: 'rootfs-aarch64.tar.gz' },
@@ -37,8 +46,22 @@ function bin() {
   return 'udocker';
 }
 const pre = () => (process.getuid && process.getuid() === 0 ? ['--allow-root'] : []);
-const fullEnv = () => ({ ...process.env, UDOCKER_DIR: UDIR, PATH: `${path.join(os.homedir(), '.local', 'bin')}:${process.env.PATH || ''}` });
-const minimalEnv = () => ({ PATH: process.env.PATH || '/usr/bin:/bin', HOME: os.homedir(), UDOCKER_DIR: UDIR, LANG: 'C' });
+/*const fullEnv = () => ({ ...process.env, UDOCKER_DIR: UDIR, PATH: `${path.join(os.homedir(), '.local', 'bin')}:${process.env.PATH || ''}` });
+const minimalEnv = () => ({ PATH: process.env.PATH || '/usr/bin:/bin', HOME: os.homedir(), UDOCKER_DIR: UDIR, LANG: 'C' });*/
+const fullEnv = () => ({
+  ...process.env,
+  UDOCKER_DIR: UDIR,
+  PATH: `${path.join(os.homedir(), '.local', 'bin')}:${process.env.PATH || ''}`,
+  PYTHONPATH: pythonPath()
+});
+
+const minimalEnv = () => ({
+  PATH: process.env.PATH || '/usr/bin:/bin',
+  HOME: os.homedir(),
+  UDOCKER_DIR: UDIR,
+  LANG: 'C',
+  PYTHONPATH: pythonPath()
+});
 const U = (args, o = {}) => spawnSync(bin(), [...pre(), ...args], { env: fullEnv(), encoding: 'utf8', ...o });
 
 const exists = (n) => (U(['ps']).stdout || '').includes(`'${n}'`);
