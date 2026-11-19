@@ -36,3 +36,5 @@
 - Add Continue button under the chat when stopped (optional)
 - Add option to delete the chats (this removes them from everywhere, including context of the conversation)
 - Add thinking (shows it if the models has it, if not, forces the model to think by combining models resources)
+- Add streaming to agents
+- Add debug middleware with the --debug flag
