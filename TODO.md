@@ -38,3 +38,10 @@
 - Add thinking (shows it if the models has it, if not, forces the model to think by combining models resources)
 - Add streaming to agents
 - Add debug middleware with the --debug flag
+
+
+### Optimizations
+- Resume the context by keeping a resume of the project + small context + resume from start to end. Then redirect the last message to the model after the context (allow user in config to setup max context and calculate from it)
+- Have just 1 copy of the each file but not in context. Context only has the referekce and the index of the file in context. The file is either saves in a DB in the browser o directly in localfilesystem.
+- Mode auto to autoselect BASED on the query itself. 
+-
